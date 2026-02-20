@@ -19,11 +19,19 @@
      :input_schema (tool :schema)}))
 
 (defn dispatch
-  "Execute a tool by name with the given input table. Returns a result string."
+  "Execute a tool by name with the given input table.
+   Returns a string (for text results) or a table/array (for structured content like images)."
   [name input]
   (if-let [tool (get registry name)]
     (try
-      (string ((tool :function) input))
+      (let [result ((tool :function) input)]
+        (cond
+          # Structured content (image blocks, etc.) — pass through as-is
+          (table? result)  result
+          (tuple? result)  result
+          (array? result)  result
+          # Everything else — coerce to string
+          (string result)))
       ([err] (string "Error executing " name ": " err)))
     (string "Unknown tool: " name)))
 

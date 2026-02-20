@@ -95,14 +95,53 @@
   (term/write (color :reset))
   (term/write (restore-cursor)))
 
+(defn- visible-length
+  "Return the visible length of a string, ignoring ANSI escape sequences."
+  [s]
+  (var len 0)
+  (var in-esc false)
+  (each byte s
+    (if in-esc
+      (when (and (>= byte 0x40) (<= byte 0x7E))
+        (set in-esc false))
+      (if (= byte 0x1B)
+        (set in-esc true)
+        (++ len))))
+  len)
+
 (defn output [text]
-  "Print text in the output scroll area, then return cursor to input."
+  "Print text in the output scroll area, then return cursor to input.
+   Truncates to terminal width to prevent overflow into the prompt area."
+  (def cols (layout :cols))
+  (def vis-len (visible-length text))
+  # If the visible text fits, write it as-is.
+  # Otherwise hard-truncate to prevent overflow past the scroll region.
+  (def safe-text
+    (if (<= vis-len cols)
+      text
+      (do
+        (var vis 0)
+        (var in-esc false)
+        (var cut-at (length text))
+        (for i 0 (length text)
+          (def byte (get text i))
+          (if in-esc
+            (when (and (>= byte 0x40) (<= byte 0x7E))
+              (set in-esc false))
+            (if (= byte 0x1B)
+              (set in-esc true)
+              (do
+                (++ vis)
+                (when (>= vis cols)
+                  (set cut-at (+ i 1))
+                  (break))))))
+        (string (string/slice text 0 cut-at) (color :reset)))))
   (term/write (save-cursor))
   # Move to bottom of scroll region so new text scrolls up
   (term/write (move-to (layout :output-bottom) 1))
   (term/write "\n")
   (term/write (clear-line))
-  (term/write text)
+  (term/write safe-text)
   (term/write (color :reset))
   (term/write (restore-cursor)))
 
@@ -110,6 +149,41 @@
   "Print multi-line text in the output area, one line at a time."
   (each line (string/split "\n" text)
     (output line)))
+
+# ── Line wrapping ──────────────────────────────────────────────
+
+(defn- wrap-line [text max-width]
+  "Word-wrap a plain text line to max-width. Returns an array of lines.
+   Breaks at the last space before max-width when possible, otherwise hard-breaks."
+  (if (<= (length text) max-width)
+    @[text]
+    (do
+      (def result @[])
+      (var start 0)
+      (while (< start (length text))
+        (def remaining (- (length text) start))
+        (if (<= remaining max-width)
+          (do
+            (array/push result (string/slice text start))
+            (set start (length text)))
+          (do
+            (def chunk-end (+ start max-width))
+            # Look for a space to break at (scan backward from chunk-end)
+            (var break-at nil)
+            (for i 0 max-width
+              (def pos (- chunk-end 1 i))
+              (when (= (get text pos) (chr " "))
+                (set break-at pos)
+                (break)))
+            (if (and break-at (> break-at start))
+              (do
+                (array/push result (string/slice text start break-at))
+                (set start (+ break-at 1)))  # skip the space
+              (do
+                # No space found — hard break
+                (array/push result (string/slice text start chunk-end))
+                (set start chunk-end))))))
+      result)))
 
 # ── Formatted output helpers ──────────────────────────────────
 
@@ -127,14 +201,66 @@
   (output (string indent-pad text)))
 
 (defn output-agent [lines]
-  "Print a complete agent response. Takes a string (possibly multi-line)."
+  "Print a complete agent response. Takes a string (possibly multi-line).
+   Word-wraps lines that exceed terminal width."
   (def parts (string/split "\n" lines))
+  (def max-width (max 20 (- (layout :cols) 8)))  # 7 indent + 1 margin
   (var first true)
   (each line parts
-    (when (not= "" line)
-      (if first
-        (do (output-agent-start line) (set first false))
-        (output-agent-cont line)))))
+    (if (= "" line)
+      (output "")  # preserve blank lines
+      (do
+        (def wrapped (wrap-line line max-width))
+        (each wl wrapped
+          (if first
+            (do (output-agent-start wl) (set first false))
+            (output-agent-cont wl)))))))
+
+# ── Streaming output state ─────────────────────────────────────
+
+(var- stream-state @{:active false :line-buf @"" :first true})
+
+(defn stream-start []
+  "Begin a streaming agent response. Must call stream-end when done."
+  (put stream-state :active true)
+  (put stream-state :first true)
+  (buffer/clear (stream-state :line-buf)))
+
+(defn stream-delta [text]
+  "Append a text delta to the streaming output. Handles line wrapping and newlines."
+  (def buf (stream-state :line-buf))
+  (def max-width (max 20 (- (layout :cols) 8)))
+
+  (each byte text
+    (if (= byte (chr "\n"))
+      (do
+        # Flush current line
+        (def line (string buf))
+        (buffer/clear buf)
+        (if (= "" line)
+          (output "")
+          (do
+            (def wrapped (wrap-line line max-width))
+            (each wl wrapped
+              (if (stream-state :first)
+                (do (output-agent-start wl) (put stream-state :first false))
+                (output-agent-cont wl))))))
+      (buffer/push buf byte))))
+
+(defn stream-end []
+  "Finish a streaming agent response. Flushes any remaining text."
+  (def buf (stream-state :line-buf))
+  (def max-width (max 20 (- (layout :cols) 8)))
+  (when (> (length buf) 0)
+    (def line (string buf))
+    (def wrapped (wrap-line line max-width))
+    (each wl wrapped
+      (if (stream-state :first)
+        (do (output-agent-start wl) (put stream-state :first false))
+        (output-agent-cont wl))))
+  (buffer/clear buf)
+  (put stream-state :active false)
+  (put stream-state :first true))
 
 (defn output-tool [name &opt detail]
   (def msg (if detail
@@ -227,3 +353,14 @@
   (term/write (move-to (layout :rows) 1))
   (term/write (string (color :reset) "\n"))
   (term/disable-raw-mode))
+
+(defn restore []
+  "Restore TUI after resuming from suspend (ctrl-z).
+   Re-enables raw mode is already done by term/suspend, so just redraw."
+  (refresh-layout)
+  (term/write (clear-screen))
+  (term/write (move-to 1 1))
+  (term/write (set-scroll-region 1 (layout :output-bottom)))
+  (draw-separator)
+  (output-info "resumed — gent")
+  (term/write (move-to (layout :input-row) 1)))

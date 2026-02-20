@@ -100,68 +100,94 @@
   (set cursor 0)
   (render))
 
+(defn handle-event
+  "Process a single terminal event for the editor.
+   Returns:
+     - a string (the submitted input) on Enter
+     - :quit on Ctrl-C/Ctrl-D
+     - nil for normal keystrokes (handled, no submission)"
+  [ev]
+  (unless ev (break :quit))
+
+  (when (= :key (ev :type))
+    (def key (ev :key))
+    (def ctrl (ev :ctrl))
+
+    (cond
+      # Submit
+      (= key :enter)
+      (do
+        (def result (string buf))
+        (buffer/clear buf)
+        (set cursor 0)
+        (render)
+        (break result))
+
+      # Quit
+      (and ctrl (or (= key "c") (= key "d")))
+      (break :quit)
+
+      # Backspace
+      (= key :backspace)
+      (delete-back)
+
+      # Delete
+      (= key :delete)
+      (delete-forward)
+
+      # Navigation
+      (= key :left)   (move-left)
+      (= key :right)  (move-right)
+      (= key :home)   (move-home)
+      (= key :end)    (move-end)
+
+      # Emacs-style shortcuts
+      (and ctrl (= key "a")) (move-home)
+      (and ctrl (= key "e")) (move-end)
+      (and ctrl (= key "k")) (kill-line)
+      (and ctrl (= key "u")) (clear-input)
+      (and ctrl (= key "w")) (kill-word-back)
+
+      # Suspend (ctrl-z)
+      (and ctrl (= key "z"))
+      (do
+        (term/suspend)
+        # Restore TUI after resume
+        (ui/restore)
+        (render))
+
+      # Regular character
+      (string? key)
+      (insert-char key)))
+
+  # Handle resize
+  (when (= :resize (ev :type))
+    (ui/refresh-layout)
+    (ui/draw-separator)
+    (render))
+
+  nil)
+
+(defn reset []
+  "Clear the editor buffer and re-render."
+  (buffer/clear buf)
+  (set cursor 0)
+  (render))
+
 (defn read-input
   "Block until the user submits a line (Enter) or quits (Ctrl-C/Ctrl-D).
    Returns the input string, or nil to quit."
   []
-  (buffer/clear buf)
-  (set cursor 0)
-  (render)
+  (reset)
 
   (var result nil)
   (var done false)
 
   (while (not done)
     (def ev (term/read-event))
-    (unless ev (set done true) (break))
-
-    (when (= :key (ev :type))
-      (def key (ev :key))
-      (def ctrl (ev :ctrl))
-
-      (cond
-        # Submit
-        (= key :enter)
-        (do
-          (set result (string buf))
-          (buffer/clear buf)
-          (set cursor 0)
-          (render)
-          (set done true))
-
-        # Quit
-        (and ctrl (or (= key "c") (= key "d")))
-        (set done true)
-
-        # Backspace
-        (= key :backspace)
-        (delete-back)
-
-        # Delete
-        (= key :delete)
-        (delete-forward)
-
-        # Navigation
-        (= key :left)   (move-left)
-        (= key :right)  (move-right)
-        (= key :home)   (move-home)
-        (= key :end)    (move-end)
-
-        # Emacs-style shortcuts
-        (and ctrl (= key "a")) (move-home)
-        (and ctrl (= key "e")) (move-end)
-        (and ctrl (= key "k")) (kill-line)
-        (and ctrl (= key "u")) (clear-input)
-        (and ctrl (= key "w")) (kill-word-back)
-
-        # Regular character
-        (string? key)
-        (insert-char key))
-
-      # Handle resize
-      (when (= :resize (ev :type))
-        (ui/refresh-layout)
-        (ui/draw-separator)
-        (render))))
+    (def r (handle-event ev))
+    (cond
+      (= r :quit) (do (set done true))
+      (string? r)  (do (set result r) (set done true))))
 
   result)

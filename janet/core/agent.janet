@@ -59,9 +59,8 @@
   (set system-prompt prompt))
 
 (defn- handle-tool-calls
-  "Execute tool calls from the assistant response. Returns [assistant-msg tool-results] or nil."
-  [response]
-  (def content (get response :content []))
+  "Execute tool calls from the response content blocks. Returns [assistant-msg tool-results] or nil."
+  [content]
   (def tool-calls (filter |(= "tool_use" ($ :type)) content))
 
   (when (empty? tool-calls)
@@ -77,10 +76,23 @@
         (ui/output-eval-janet (get (tc :input) :code ""))
         (ui/output-tool (tc :name) (json/encode (tc :input))))
       (def result (tools/dispatch (tc :name) (tc :input)))
-      (ui/output-tool-result (string result))
-      {:type "tool_result"
-       :tool_use_id (tc :id)
-       :content (string result)}))
+      # Handle structured content (image blocks) vs plain text
+      (if (or (table? result) (array? result) (tuple? result))
+        (do
+          # Structured content — wrap in array for API
+          (def content-arr
+            (if (or (array? result) (tuple? result))
+              result
+              @[result]))
+          (ui/output-tool-result (string "[Image: " (get-in result [:source :media_type] "unknown") "]"))
+          {:type "tool_result"
+           :tool_use_id (tc :id)
+           :content content-arr})
+        (do
+          (ui/output-tool-result (string result))
+          {:type "tool_result"
+           :tool_use_id (tc :id)
+           :content (string result)}))))
 
   [assistant-msg {:role "user" :content tool-results}])
 
@@ -90,8 +102,63 @@
     (when (= "text" (block :type))
       (ui/output-agent (block :text)))))
 
+(defn- build-effective-prompt []
+  "Build the system prompt with AGENTS.md and skills snippets."
+  (def agents-md-snippet (agents-md/system-prompt-snippet))
+  (def skills-snippet (skills/system-prompt-snippet))
+  (string system-prompt
+          (if (not= "" agents-md-snippet) (string "\n" agents-md-snippet) "")
+          (if (not= "" skills-snippet) (string "\n" skills-snippet) "")))
+
+(defn- start-streaming
+  "Start a non-blocking streaming API call. Returns the stream context."
+  [conversation effective-prompt]
+  (ui/stream-start)
+  (def stream-ctx
+    (api/stream-start
+      conversation
+      (tools/definitions)
+      @{:on-text (fn [text]
+          (ui/stream-delta text))
+        :on-error (fn [err]
+          (ui/output-error (string "Stream error: " err)))}
+      effective-prompt))
+  stream-ctx)
+
+(defn- drain-stream
+  "Read all available stream lines (non-blocking). Returns :done when stream ends,
+   :error on error, or nil when no more data is available right now."
+  [parser]
+  (var result nil)
+  (var keep-going true)
+  (while keep-going
+    (def line (http/stream-read))
+    (cond
+      # No data available — return to the event loop
+      (nil? line)
+      (set keep-going false)
+
+      # Stream finished
+      (= :done line)
+      (do
+        (set result :done)
+        (set keep-going false))
+
+      # Error table
+      (and (table? line) (= :error (get line :type)))
+      (do
+        (ui/output-error (string "Stream error: " (get line :message "unknown")))
+        (set result :error)
+        (set keep-going false))
+
+      # Normal SSE line — feed to parser
+      (string? line)
+      ((parser :feed) line)))
+  result)
+
 (defn run
-  "Main agent loop. Reads input, sends to Claude, executes tools, loops."
+  "Main agent loop. Uses a unified event loop that handles both terminal
+   input and streaming API responses concurrently."
   []
   # Set up TUI
   (ui/setup)
@@ -112,55 +179,106 @@
 
     (var conversation @[])
 
+    # State machine
+    # :idle       — waiting for user input
+    # :streaming  — API stream active, receiving SSE data
+    # :tools      — executing tool calls (synchronous)
+    (var state :idle)
+    (var stream-ctx nil)      # current stream context (parser etc.)
+    (var pending-input nil)   # input typed during streaming
+
+    (editor/reset)
+
     (while true
-      # Read user input via the editor
-      (def input (editor/read-input))
-      (unless input (break))
+      # ── Poll terminal events (short timeout when streaming, block when idle) ──
+      (def timeout (if (= state :idle) nil 16))
+      (def ev (term/read-event timeout))
 
-      # Skip empty input
-      (when (not= "" input)
-        # Show the user message in the output area
-        (ui/output-user input)
-
-        # Add user message to conversation
-        (array/push conversation {:role "user" :content input})
-
-        # Agent loop: keep going until no more tool calls
-        (var looping true)
-        (while looping
-          # Build effective system prompt (base + AGENTS.md + skills)
-          (def agents-md-snippet (agents-md/system-prompt-snippet))
-          (def skills-snippet (skills/system-prompt-snippet))
-          (def effective-prompt
-            (string system-prompt
-                    (if (not= "" agents-md-snippet) (string "\n" agents-md-snippet) "")
-                    (if (not= "" skills-snippet) (string "\n" skills-snippet) "")))
-
-          # Call the API (with error handling)
-          (var response nil)
-          (try
-            (set response (api/chat conversation (tools/definitions) effective-prompt))
-            ([err]
-              (ui/output-error (string err))
-              (set looping false)
-              (break)))
-
-          # Check for nil response
-          (when (nil? response)
-            (ui/output-error "API request failed — nil response")
-            (set looping false)
+      # ── Handle terminal event ──
+      (when ev
+        (def r (editor/handle-event ev))
+        (cond
+          (= r :quit)
+          (do
+            # Cancel any active stream
+            (when (= state :streaming)
+              (http/stream-stop)
+              (ui/stream-end))
             (break))
 
-          # Handle tool calls if any
-          (def tool-result (handle-tool-calls response))
+          (string? r)
+          (if (= state :idle)
+            # Submit immediately
+            (when (not= "" r)
+              (ui/output-user r)
+              (array/push conversation {:role "user" :content r})
+              (def effective-prompt (build-effective-prompt))
+              (try
+                (do
+                  (set stream-ctx (start-streaming conversation effective-prompt))
+                  (set state :streaming))
+                ([err]
+                  (ui/output-error (string err)))))
+            # During streaming — queue it for later
+            (when (not= "" r)
+              (set pending-input r)))))
 
-          (if tool-result
+      # ── Drain stream data when streaming ──
+      (when (= state :streaming)
+        (def parser (stream-ctx :parser))
+        (def drain-result (drain-stream parser))
+
+        (when (or (= drain-result :done) (= drain-result :error))
+          (ui/stream-end)
+
+          (if (= drain-result :error)
             (do
-              # Add assistant message and tool results to conversation
-              (array/push conversation (tool-result 0))
-              (array/push conversation (tool-result 1)))
+              (set state :idle)
+              (set stream-ctx nil))
             (do
-              # No tool calls — print text response and wait for next input
-              (print-text-response response)
-              (array/push conversation {:role "assistant" :content (get response :content [])})
-              (set looping false))))))))
+              # Stream finished — get the response
+              (def response ((parser :finish)))
+
+              (when (nil? response)
+                (ui/output-error "API request failed — nil response")
+                (set state :idle)
+                (set stream-ctx nil)
+                (break))
+
+              # Handle tool calls if any
+              (def content (get response :content []))
+              (def tool-result (handle-tool-calls content))
+
+              (if tool-result
+                (do
+                  # Add assistant + tool results, start another API call
+                  (array/push conversation (tool-result 0))
+                  (array/push conversation (tool-result 1))
+                  (def effective-prompt (build-effective-prompt))
+                  (try
+                    (do
+                      (set stream-ctx (start-streaming conversation effective-prompt))
+                      (set state :streaming))
+                    ([err]
+                      (ui/output-error (string err))
+                      (set state :idle)
+                      (set stream-ctx nil))))
+                (do
+                  # No tool calls — response complete
+                  (array/push conversation {:role "assistant" :content content})
+                  (set state :idle)
+                  (set stream-ctx nil)
+
+                  # If user typed something during streaming, submit it now
+                  (when pending-input
+                    (ui/output-user pending-input)
+                    (array/push conversation {:role "user" :content pending-input})
+                    (set pending-input nil)
+                    (def effective-prompt (build-effective-prompt))
+                    (try
+                      (do
+                        (set stream-ctx (start-streaming conversation effective-prompt))
+                        (set state :streaming))
+                      ([err]
+                        (ui/output-error (string err))))))))))))
+    ))

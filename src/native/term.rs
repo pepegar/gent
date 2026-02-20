@@ -130,6 +130,43 @@ fn read_event(args: &mut [Janet]) -> Janet {
     }
 }
 
+/// (term/suspend)
+/// Suspend the process (like ctrl-z in a normal terminal).
+/// Disables raw mode, sends SIGTSTP to own process, and when resumed
+/// re-enables raw mode. Returns true on success.
+#[janetrs::janet_fn(arity(fix(0)))]
+fn suspend(_args: &mut [Janet]) -> Janet {
+    // 1. Disable raw mode so the terminal is sane while suspended
+    let _ = terminal::disable_raw_mode();
+
+    // 2. Show the cursor (it may be hidden) and reset scroll region
+    use std::io::Write;
+    {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        // Reset scroll region, move to bottom, show cursor
+        let _ = handle.write_all(b"\x1b[r\x1b[999;1H\x1b[?25h\n");
+        let _ = handle.flush();
+    }
+
+    // 3. Send SIGTSTP to our own process
+    #[cfg(unix)]
+    {
+        unsafe {
+            // Restore default SIGTSTP handler (raw mode may have blocked it)
+            libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+            // Send SIGTSTP to ourselves — this suspends us
+            libc::raise(libc::SIGTSTP);
+            // When we get here, we've been resumed (SIGCONT)
+        }
+    }
+
+    // 4. Re-enable raw mode
+    let _ = terminal::enable_raw_mode();
+
+    Janet::boolean(true)
+}
+
 fn key_event_to_janet(key: KeyEvent) -> Janet {
     let mut table = JanetTable::with_capacity(5);
     table.insert(
@@ -183,4 +220,5 @@ pub fn register(client: &mut JanetClient) {
     client.add_c_fn(CFunOptions::new(c"disable-raw-mode", disable_raw_mode_c).namespace(c"term"));
     client.add_c_fn(CFunOptions::new(c"size", size_c).namespace(c"term"));
     client.add_c_fn(CFunOptions::new(c"read-event", read_event_c).namespace(c"term"));
+    client.add_c_fn(CFunOptions::new(c"suspend", suspend_c).namespace(c"term"));
 }
