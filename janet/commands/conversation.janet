@@ -1,0 +1,91 @@
+# Built-in slash commands for conversation management.
+# Imported at boot to register /sessions, /resume, /fork, etc.
+
+(import core/commands :as commands)
+(import core/conversation :as conv)
+
+(commands/register "help"
+  {:description "Show available commands"
+   :usage "/help"
+   :function (fn [args]
+     (def cmds (commands/list-commands))
+     (def lines @["Available commands:"])
+     (each [name desc] cmds
+       (array/push lines (string "  /" name " — " desc)))
+     (string/join lines "\n"))})
+
+(commands/register "session"
+  {:description "Show current session ID and path"
+   :usage "/session"
+   :function (fn [args]
+     (string "Session: " (conv/get-session-id) "\n"
+             "Path: " (conv/get-session-path) "\n"
+             "Messages: " (conv/length) "\n"
+             "Tokens (est): ~" (conv/estimate-tokens)))})
+
+(commands/register "sessions"
+  {:description "List all sessions for this project"
+   :usage "/sessions"
+   :function (fn [args]
+     (def sessions (conv/list-sessions))
+     (if (empty? sessions)
+       "No sessions found."
+       (do
+         (def current (conv/get-session-id))
+         (def lines @["Sessions:"])
+         (each s sessions
+           (if (= s current)
+             (array/push lines (string "  " s " (current)"))
+             (array/push lines (string "  " s))))
+         (string/join lines "\n"))))})
+
+(commands/register "resume"
+  {:description "Resume a previous session"
+   :usage "/resume <session-id>"
+   :function (fn [args]
+     (def sid (string/trim args))
+     (when (= "" sid)
+       (break "Usage: /resume <session-id>"))
+     (conv/resume sid)
+     (string "Resumed session " sid " (" (conv/length) " messages)"))})
+
+(commands/register "fork"
+  {:description "Fork the conversation into a new session"
+   :usage "/fork"
+   :function (fn [args]
+     (def new-sid (conv/fork))
+     (string "Forked → " new-sid " (" (conv/length) " messages)"))})
+
+(commands/register "unfork"
+  {:description "Return to the parent session (before the last fork)"
+   :usage "/unfork"
+   :function (fn [args]
+     (def pid (conv/unfork))
+     (if pid
+       (string "Returned to session " pid " (" (conv/length) " messages)")
+       "No parent session to return to."))})
+
+(commands/register "rollback"
+  {:description "Remove the last n messages (default: 2)"
+   :usage "/rollback [n]"
+   :function (fn [args]
+     (def n-str (string/trim args))
+     (def n (if (= "" n-str) 2 (scan-number n-str)))
+     (unless n
+       (break "Usage: /rollback [n] — n must be a number"))
+     (conv/rollback n)
+     (string "Rolled back " n " messages (" (conv/length) " remaining)"))})
+
+(commands/register "clear"
+  {:description "Clear the conversation (fresh start, same session)"
+   :usage "/clear"
+   :function (fn [args]
+     (conv/clear)
+     "Conversation cleared.")})
+
+(commands/register "tokens"
+  {:description "Estimate token usage for the current conversation"
+   :usage "/tokens"
+   :function (fn [args]
+     (string "Messages: " (conv/length) "\n"
+             "Estimated tokens: ~" (conv/estimate-tokens)))})
