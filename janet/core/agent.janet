@@ -11,6 +11,7 @@
 (import core/hooks :as hooks)
 (import core/conversation :as conv)
 (import core/commands :as commands)
+(import core/registers :as reg)
 
 (var- system-prompt
   `````
@@ -75,33 +76,29 @@
   # Execute each tool call
   (def tool-results
     (seq [tc :in tool-calls]
-      (cond
-        (= "eval_janet" (tc :name))
-        (ui/output-eval-janet (get (tc :input) :code ""))
-
-        (= "edit_file" (tc :name))
-        (ui/output-edit-file (tc :input))
-
-        # Default: show tool name + raw JSON
-        (ui/output-tool (tc :name) (json/encode (tc :input))))
+      # Render tool call: global hook first, then ui dispatch (custom renderer → built-in default)
+      (def hook-handled (hooks/run :render-tool-call (tc :name) (tc :input)))
+      (unless hook-handled
+        (ui/render-tool-call (tc :name) (tc :input)))
+      # tools/dispatch fires :before-tool-call and :after-tool-call hooks internally
       (def result (tools/dispatch (tc :name) (tc :input)))
-      # Handle structured content (image blocks) vs plain text
+      # Render tool result: global hook first, then ui dispatch (custom renderer → built-in default)
+      (def result-hook-handled (hooks/run :render-tool-result (tc :name) result))
+      (unless result-hook-handled
+        (ui/render-tool-result (tc :name) result))
+      # Build the tool_result message for the API
       (if (or (table? result) (array? result) (tuple? result))
         (do
-          # Structured content — wrap in array for API
           (def content-arr
             (if (or (array? result) (tuple? result))
               result
               @[result]))
-          (ui/output-tool-result (string "[Image: " (get-in result [:source :media_type] "unknown") "]"))
           {:type "tool_result"
            :tool_use_id (tc :id)
            :content content-arr})
-        (do
-          (ui/output-tool-result (string result))
-          {:type "tool_result"
-           :tool_use_id (tc :id)
-           :content (string result)}))))
+        {:type "tool_result"
+         :tool_use_id (tc :id)
+         :content (string result)})))
 
   [assistant-msg {:role "user" :content tool-results}])
 

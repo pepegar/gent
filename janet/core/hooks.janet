@@ -6,6 +6,8 @@
 # Supported hooks:
 #   :before-tool-call  (fn [name input])         — called before dispatching a tool
 #   :after-tool-call   (fn [name input result])   — called after a tool returns
+#   :render-tool-call  (fn [name input])          — custom tool call rendering; return truthy to suppress default
+#   :render-tool-result (fn [name result])        — custom tool result rendering; return truthy to suppress default
 #   :before-send       (fn [conversation])         — called before API call, can mutate conversation
 #   :after-response    (fn [response])             — called after API response received
 #   :on-error          (fn [err])                  — called on errors

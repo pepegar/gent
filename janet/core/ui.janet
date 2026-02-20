@@ -381,6 +381,44 @@
   "Override the maximum number of lines shown for tool results."
   (set tool-result-max-lines n))
 
+# ── Pluggable tool renderers ──────────────────────────────────
+# Users can override how any tool call or result is displayed.
+# Renderers are functions: (fn [input]) for calls, (fn [result]) for results.
+# Return truthy to suppress the default rendering.
+
+(var- tool-renderers @{})
+(var- tool-result-renderers @{})
+
+(defn set-tool-renderer
+  "Set a custom renderer for a tool's call display. Pass nil to clear."
+  [name renderer]
+  (if renderer
+    (put tool-renderers name renderer)
+    (put tool-renderers name nil)))
+
+(defn set-tool-result-renderer
+  "Set a custom renderer for a tool's result display. Pass nil to clear."
+  [name renderer]
+  (if renderer
+    (put tool-result-renderers name renderer)
+    (put tool-result-renderers name nil)))
+
+(defn render-tool-call
+  "Render a tool call, using custom renderer if set, otherwise built-in defaults."
+  [name input]
+  (def custom (get tool-renderers name))
+  (if custom
+    (custom input)
+    # Built-in defaults
+    (cond
+      (= "eval_janet" name)
+      (output-eval-janet (get input :code ""))
+
+      (= "edit_file" name)
+      (output-edit-file input)
+
+      (output-tool name (json/encode input)))))
+
 (defn- truncate-line [line max-width]
   "Truncate a line to max-width characters, adding … if truncated."
   (if (<= (length line) max-width)
@@ -400,6 +438,17 @@
   (when (> total tool-result-max-lines)
     (def omitted (- total tool-result-max-lines))
     (output (string "    " (color :separator) "… " omitted " more lines omitted" (color :reset)))))
+
+(defn render-tool-result
+  "Render a tool result, using custom renderer if set, otherwise built-in default."
+  [name result]
+  (def custom (get tool-result-renderers name))
+  (if custom
+    (custom result)
+    # Built-in default
+    (if (or (table? result) (array? result) (tuple? result))
+      (output-tool-result (string "[Image: " (get-in result [:source :media_type] "unknown") "]"))
+      (output-tool-result (string result)))))
 
 (defn output-error [text]
   (output (string (color :error-label) " error " (color :reset) " " text)))
@@ -450,14 +499,7 @@
       (when (and (dictionary? block) (= "text" (get block :type)))
         (output-agent (block :text)))
       (when (and (dictionary? block) (= "tool_use" (get block :type)))
-        (cond
-          (= "eval_janet" (get block :name))
-          (output-eval-janet (get-in block [:input :code] ""))
-
-          (= "edit_file" (get block :name))
-          (output-edit-file (get block :input))
-
-          (output-tool (get block :name)))))
+        (render-tool-call (get block :name) (get block :input))))
 
     # Tool results (user message with array of tool_result blocks)
     (and (= role "user") (indexed? content))

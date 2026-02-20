@@ -46,6 +46,11 @@
           errmsg)))
     (string "Unknown tool: " name)))
 
+(defn get-tool
+  "Get a tool definition by name, or nil."
+  [name]
+  (get registry name))
+
 (defn list-registered
   "Return a list of registered tool names."
   []
