@@ -197,10 +197,10 @@
 # ── Public API ─────────────────────────────────────────────────
 
 (defn list-skills
-  "Return array of {:name :description} for all discovered skills."
+  "Return array of {:name :description :path} for all discovered skills."
   []
   (seq [[name skill] :pairs skills]
-    {:name name :description (skill :description)}))
+    {:name name :description (skill :description) :path (skill :path)}))
 
 (defn get-skill
   "Return full skill data for the given name, or nil."

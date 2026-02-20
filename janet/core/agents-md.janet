@@ -21,7 +21,8 @@
       (if (= "" parent) "/" parent))))
 
 (defn discover
-  "Walk from cwd to /, collecting all AGENTS.md files. Closest first."
+  "Walk from cwd to /, collecting all AGENTS.md files. Closest first.
+   Also loads ~/.agents/AGENTS.md as a global fallback (last)."
   []
   (array/clear files)
   (var dir (os/cwd))
@@ -30,6 +31,13 @@
     (when (os/stat candidate)
       (array/push files candidate))
     (set dir (parent-dir dir)))
+  # Also check ~/.agents/AGENTS.md as a global user-level config
+  (def home (os/getenv "HOME"))
+  (when home
+    (def global-candidate (string home "/.agents/AGENTS.md"))
+    (when (and (os/stat global-candidate)
+               (not (find |(= $ global-candidate) files)))
+      (array/push files global-candidate)))
   files)
 
 (defn list-files

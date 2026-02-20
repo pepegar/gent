@@ -103,7 +103,7 @@
     (when (not (empty? skill-list))
       (ui/output-info (string "  " (length skill-list) " skills:"))
       (each s (sort-by |($ :name) skill-list)
-        (ui/output-info (string "    • " (s :name) " — " (s :description)))))
+        (ui/output-info (string "    • " (s :name) " — " (s :path)))))
     (def agents-md-files (agents-md/list-files))
     (when (not (empty? agents-md-files))
       (ui/output-info (string "  " (length agents-md-files) " AGENTS.md:"))

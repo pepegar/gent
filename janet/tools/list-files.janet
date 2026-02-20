@@ -1,6 +1,6 @@
 (import core/tools :as tools)
 
-(def- default-limit 200)
+(def- default-limit 10)
 
 (defn- walk-dir [dir]
   "Recursively list files and directories under dir (fallback when not in a git repo)."
@@ -31,13 +31,13 @@
 
 (tools/register "list_files"
   {:description ```List files and directories at the given path. Respects .gitignore when inside a git repository.
-Returns a JSON array of file paths. When the result is truncated, a message indicates how many files were omitted.
-Use the limit parameter to control how many files are returned (default 200).```
+Returns a newline-separated list of file paths. When the result is truncated, a message indicates how many files were omitted.
+Use the limit parameter to control how many files are returned (default 10).```
    :schema {:type "object"
             :properties {:path {:type "string"
                                 :description "Optional relative path to list files from. Defaults to current directory."}
                          :limit {:type "integer"
-                                 :description "Maximum number of files to return. Defaults to 200."}}
+                                 :description "Maximum number of files to return. Defaults to 10."}}
             :required []}
    :function (fn [input]
                (def dir (or (get input :path) "."))
@@ -45,8 +45,8 @@ Use the limit parameter to control how many files are returned (default 200).```
                (def files (or (git-list-files dir) (walk-dir dir)))
                (def total (length files))
                (if (<= total limit)
-                 (json/encode files)
+                 (string/join files "\n")
                  (let [truncated (array/slice files 0 limit)]
-                   (string (json/encode truncated)
+                   (string (string/join truncated "\n")
                            "\n\n[Truncated: showing " limit " of " total " files. "
                            "Use a more specific path or increase the limit to see more.]"))))})
