@@ -9,6 +9,11 @@
 #   :before-send       (fn [conversation])         — called before API call, can mutate conversation
 #   :after-response    (fn [response])             — called after API response received
 #   :on-error          (fn [err])                  — called on errors
+#   :after-message     (fn [msg])                  — called after any message is pushed to conversation
+#   :conversation-clear                            — called when conversation is cleared
+#   :conversation-rollback (fn [n])                — called after rolling back n messages
+#   :session-resume    (fn [session-id])           — called after resuming a session
+#   :session-fork      (fn [old-id new-id])        — called after forking a session
 
 (var- hooks @{})
 
