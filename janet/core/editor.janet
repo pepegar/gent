@@ -2,6 +2,7 @@
 # Handles keypresses, cursor movement, and basic line editing.
 
 (import core/ui :as ui)
+(import core/conversation :as conv)
 
 (var- buf @"")
 (var- cursor 0)
@@ -152,8 +153,8 @@
       (and ctrl (= key "z"))
       (do
         (term/suspend)
-        # Restore TUI after resume
-        (ui/restore)
+        # Restore TUI after resume — replay conversation history
+        (ui/restore (conv/get-messages))
         (render))
 
       # Regular character

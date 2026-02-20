@@ -429,13 +429,58 @@
   (term/write (string (color :reset) "\n"))
   (term/disable-raw-mode))
 
-(defn restore []
+(defn- replay-message
+  "Replay a single conversation message to the output area."
+  [msg]
+  (def role (get msg :role))
+  (def content (get msg :content))
+  (cond
+    # User message with plain text
+    (and (= role "user") (string? content))
+    (unless (string/has-prefix? "[context]" content)
+      (output-user content))
+
+    # Assistant message with plain text (shouldn't happen normally, but handle it)
+    (and (= role "assistant") (string? content))
+    (output-agent content)
+
+    # Assistant message with content blocks (text + tool_use)
+    (and (= role "assistant") (indexed? content))
+    (each block content
+      (when (and (dictionary? block) (= "text" (get block :type)))
+        (output-agent (block :text)))
+      (when (and (dictionary? block) (= "tool_use" (get block :type)))
+        (cond
+          (= "eval_janet" (get block :name))
+          (output-eval-janet (get-in block [:input :code] ""))
+
+          (= "edit_file" (get block :name))
+          (output-edit-file (get block :input))
+
+          (output-tool (get block :name)))))
+
+    # Tool results (user message with array of tool_result blocks)
+    (and (= role "user") (indexed? content))
+    (each block content
+      (when (and (dictionary? block) (= "tool_result" (get block :type)))
+        (def result-content (get block :content ""))
+        (when (string? result-content)
+          (output-tool-result result-content))))))
+
+(defn restore [&opt messages]
   "Restore TUI after resuming from suspend (ctrl-z).
-   Re-enables raw mode is already done by term/suspend, so just redraw."
+   Re-enables raw mode (already done by term/suspend), redraws the screen,
+   and replays conversation history if messages are provided."
   (refresh-layout)
   (term/write (clear-screen))
   (term/write (move-to 1 1))
   (term/write (set-scroll-region 1 (layout :output-bottom)))
   (draw-separator)
-  (output-info "resumed — gent")
+
+  # Replay conversation history
+  (when messages
+    (each msg messages
+      (replay-message msg)))
+
+  (output-info "— resumed —")
   (term/write (move-to (layout :input-row) 1)))
