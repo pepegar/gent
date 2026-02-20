@@ -300,6 +300,58 @@
     (output (string bg "    " ln linenum " " bd "│" cd bg " "
                     code-line (string/repeat " " pad) rst))))
 
+(defn output-edit-file [input]
+  "Render edit_file tool call with a diff-like display showing path, removed, and added lines."
+  (def path (get input :path ""))
+  (def old-str (get input :old_str ""))
+  (def new-str (get input :new_str ""))
+  (def cols (layout :cols))
+  (def rst (color :reset))
+  (def sep (color :separator))
+
+  # Header: tool name + file path
+  (def is-create (= "" old-str))
+  (if is-create
+    (output (string (color :tool-label) "  ▸ edit_file" rst " " sep path rst
+                    " " (color :tool-label) "(new file)" rst))
+    (output (string (color :tool-label) "  ▸ edit_file" rst " " sep path rst)))
+
+  # Colors for diff lines
+  (def red-bg (csi "48;5;52m"))      # dark red background for removed
+  (def red-fg (csi "38;5;210m"))     # light red text for removed
+  (def green-bg (csi "48;5;22m"))    # dark green background for added
+  (def green-fg (csi "38;5;114m"))   # light green text for added
+  (def line-max (max 20 (- cols 10)))
+  (def max-diff-lines 8)
+
+  # Show removed lines (old_str)
+  (when (not= "" old-str)
+    (def old-lines (string/split "\n" old-str))
+    (def show-n (min (length old-lines) max-diff-lines))
+    (for i 0 show-n
+      (def line (get old-lines i ""))
+      (def truncated (if (> (length line) line-max)
+                       (string (string/slice line 0 (- line-max 1)) "…")
+                       line))
+      (def pad (max 0 (- line-max (length truncated))))
+      (output (string red-bg "    " red-fg "- " truncated (string/repeat " " pad) rst)))
+    (when (> (length old-lines) max-diff-lines)
+      (output (string "    " sep "  … " (- (length old-lines) max-diff-lines) " more lines" rst))))
+
+  # Show added lines (new_str)
+  (when (not= "" new-str)
+    (def new-lines (string/split "\n" new-str))
+    (def show-n (min (length new-lines) max-diff-lines))
+    (for i 0 show-n
+      (def line (get new-lines i ""))
+      (def truncated (if (> (length line) line-max)
+                       (string (string/slice line 0 (- line-max 1)) "…")
+                       line))
+      (def pad (max 0 (- line-max (length truncated))))
+      (output (string green-bg "    " green-fg "+ " truncated (string/repeat " " pad) rst)))
+    (when (> (length new-lines) max-diff-lines)
+      (output (string "    " sep "  … " (- (length new-lines) max-diff-lines) " more lines" rst)))))
+
 (var- tool-result-max-lines 10)
 
 (defn set-tool-result-max-lines [n]
