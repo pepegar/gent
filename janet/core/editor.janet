@@ -26,7 +26,6 @@
     (buffer/push buf ch)
     (do
       (def after (buffer/slice buf cursor))
-      (set (buf cursor) nil)
       (buffer/popn buf (- (length buf) cursor))
       (buffer/push buf ch)
       (buffer/push buf after)))
