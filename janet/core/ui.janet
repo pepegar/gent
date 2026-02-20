@@ -83,15 +83,38 @@
 
 (defn get-layout [] layout)
 
+# ── Status provider ────────────────────────────────────────────
+# A function that returns status text for the separator bar.
+# Set by the agent or conversation module at startup.
+
+(var- status-fn nil)
+
+(defn set-status-provider
+  "Set a function that returns status text for the separator bar.
+   The function takes no arguments and returns a string (or nil)."
+  [f]
+  (set status-fn f))
+
 # ── Drawing helpers (defined before setup uses them) ───────────
 
 (defn draw-separator []
-  "Draw the separator line between output and input."
+  "Draw the separator line between output and input.
+   Shows session status info if a status provider is set."
   (term/write (save-cursor))
   (term/write (move-to (layout :separator-row) 1))
   (term/write (clear-line))
   (term/write (color :separator))
-  (term/write (string/repeat "─" (layout :cols)))
+  (def status (when status-fn (try (status-fn) ([_] nil))))
+  (if status
+    (do
+      (def status-text (string " " status " "))
+      (def status-len (length status-text))
+      (def left-dashes 2)
+      (def right-dashes (max 0 (- (layout :cols) left-dashes status-len)))
+      (term/write (string (string/repeat "─" left-dashes)
+                          status-text
+                          (string/repeat "─" right-dashes))))
+    (term/write (string/repeat "─" (layout :cols))))
   (term/write (color :reset))
   (term/write (restore-cursor)))
 
