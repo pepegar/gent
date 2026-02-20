@@ -174,11 +174,31 @@
     (output (string bg "    " ln linenum " " bd "│" cd bg " "
                     code-line (string/repeat " " pad) rst))))
 
+(var- tool-result-max-lines 10)
+
+(defn set-tool-result-max-lines [n]
+  "Override the maximum number of lines shown for tool results."
+  (set tool-result-max-lines n))
+
+(defn- truncate-line [line max-width]
+  "Truncate a line to max-width characters, adding … if truncated."
+  (if (<= (length line) max-width)
+    line
+    (string (string/slice line 0 (- max-width 1)) "…")))
+
 (defn output-tool-result [text]
-  "Render a tool call result. Shows each line dimmed and indented."
+  "Render a tool call result. Shows each line dimmed and indented.
+   Truncates to tool-result-max-lines lines and max line width of cols - 10."
   (def lines (string/split "\n" text))
-  (each line lines
-    (output (string "    " (color :separator) line (color :reset)))))
+  (def total (length lines))
+  (def max-width (max 20 (- (layout :cols) 10)))
+  (def show-lines (min total tool-result-max-lines))
+  (for i 0 show-lines
+    (def line (truncate-line (get lines i "") max-width))
+    (output (string "    " (color :separator) line (color :reset))))
+  (when (> total tool-result-max-lines)
+    (def omitted (- total tool-result-max-lines))
+    (output (string "    " (color :separator) "… " omitted " more lines omitted" (color :reset)))))
 
 (defn output-error [text]
   (output (string (color :error-label) " error " (color :reset) " " text)))
