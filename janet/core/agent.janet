@@ -185,6 +185,11 @@
       (ui/output-info (string "  " (length agents-md-files) " AGENTS.md:"))
       (each path agents-md-files
         (ui/output-info (string "    • " path))))
+    (def loaded-configs (or (reg/get :loaded-configs) @[]))
+    (when (not (empty? loaded-configs))
+      (ui/output-info (string "  " (length loaded-configs) " config:"))
+      (each path loaded-configs
+        (ui/output-info (string "    • " path))))
 
     # Initialize conversation session
     (def sid (conv/init))

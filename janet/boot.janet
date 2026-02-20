@@ -34,10 +34,41 @@
 # Discover AGENTS.md files walking up from cwd
 (agents-md/discover)
 
-# User config (like .emacs — override anything here)
-(try
-  (import init)
-  ([_] nil))
+# User config — load ~/.gent/init.janet if it exists (like ~/.emacs)
+# We add ~/.gent/ to the module path so user init can (import) their own modules from there too.
+(def- loaded-configs @[])
+
+(def- gent-home (let [home (os/getenv "HOME")]
+                  (when home (string home "/.gent"))))
+(when gent-home
+  # Add ~/.gent/ to module search paths so user init can (import) their own modules.
+  # Janet's :syspath is a single directory (substituted for :sys: in module/paths),
+  # NOT a colon/semicolon-separated list. We add ~/.gent as additional search entries.
+  (each suffix [".janet" "/init.janet"]
+    (array/push module/paths [(string gent-home "/:all:" suffix) :source]))
+  (each suffix [".jimage" ".so"]
+    (array/push module/paths [(string gent-home "/:all:" suffix) :native]))
+  (def user-init-path (string gent-home "/init.janet"))
+  (when (os/stat user-init-path)
+    (try
+      (do
+        (dofile user-init-path)
+        (array/push loaded-configs user-init-path))
+      ([err]
+        (eprintf "Error loading %s: %s" user-init-path (string err))))))
+
+# Project config — load .gent/init.janet from cwd if it exists (like .dir-locals.el)
+(def- project-init-path ".gent/init.janet")
+(when (os/stat project-init-path)
+  (try
+    (do
+      (dofile project-init-path)
+      (array/push loaded-configs project-init-path))
+    ([err]
+      (eprintf "Error loading %s: %s" project-init-path (string err)))))
+
+# Stash loaded config paths for the startup banner
+(reg/set :loaded-configs loaded-configs)
 
 # Start the agent
 (agent/run)

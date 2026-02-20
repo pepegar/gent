@@ -1,5 +1,10 @@
-# User configuration — like .emacs
-# Override anything here. This file is loaded after core modules and tools.
+# Example gent configuration
+#
+# gent loads user config from two places (in order):
+#   1. ~/.gent/init.janet     — user config (like ~/.emacs)
+#   2. .gent/init.janet       — project config (like .dir-locals.el)
+#
+# Copy this file to ~/.gent/init.janet to get started.
 #
 # Examples:
 #
@@ -28,6 +33,11 @@
 # (hooks/add :after-tool-call (fn [name input result] (printf "tool %s done" name)))
 # (hooks/add :before-send (fn [conv] (printf "sending %d messages" (length conv))))
 # (hooks/add :on-error (fn [err] (printf "error: %s" (string err))))
+#
+# Custom tool renderers (e.g. use difft for edit_file):
+# (import core/ui :as ui)
+# (ui/set-tool-renderer "edit_file" (fn [input] ...))
+# (ui/set-tool-result-renderer "edit_file" (fn [result] ...))
 #
 # Add extra skill search paths:
 # (import core/skills :as skills)
