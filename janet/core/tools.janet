@@ -2,6 +2,8 @@
 # Tools are Janet tables with :name, :description, :schema, :function.
 # The LLM can create new tools at runtime via eval-janet.
 
+(import core/hooks :as hooks)
+
 (var- registry @{})
 
 (defn register
@@ -20,19 +22,28 @@
 
 (defn dispatch
   "Execute a tool by name with the given input table.
+   Fires :before-tool-call and :after-tool-call hooks.
    Returns a string (for text results) or a table/array (for structured content like images)."
   [name input]
   (if-let [tool (get registry name)]
-    (try
-      (let [result ((tool :function) input)]
-        (cond
-          # Structured content (image blocks, etc.) — pass through as-is
-          (table? result)  result
-          (tuple? result)  result
-          (array? result)  result
-          # Everything else — coerce to string
-          (string result)))
-      ([err] (string "Error executing " name ": " err)))
+    (do
+      (hooks/run :before-tool-call name input)
+      (try
+        (let [result ((tool :function) input)]
+          (def coerced
+            (cond
+              # Structured content (image blocks, etc.) — pass through as-is
+              (table? result)  result
+              (tuple? result)  result
+              (array? result)  result
+              # Everything else — coerce to string
+              (string result)))
+          (hooks/run :after-tool-call name input coerced)
+          coerced)
+        ([err]
+          (def errmsg (string "Error executing " name ": " err))
+          (hooks/run :on-error err)
+          errmsg)))
     (string "Unknown tool: " name)))
 
 (defn list-registered

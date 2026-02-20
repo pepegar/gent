@@ -8,6 +8,7 @@
 (import core/editor :as editor)
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
+(import core/hooks :as hooks)
 
 (var- system-prompt
   `````
@@ -72,8 +73,14 @@
   # Execute each tool call
   (def tool-results
     (seq [tc :in tool-calls]
-      (if (= "eval_janet" (tc :name))
+      (cond
+        (= "eval_janet" (tc :name))
         (ui/output-eval-janet (get (tc :input) :code ""))
+
+        (= "edit_file" (tc :name))
+        (ui/output-edit-file (tc :input))
+
+        # Default: show tool name + raw JSON
         (ui/output-tool (tc :name) (json/encode (tc :input))))
       (def result (tools/dispatch (tc :name) (tc :input)))
       # Handle structured content (image blocks) vs plain text
@@ -111,8 +118,10 @@
           (if (not= "" skills-snippet) (string "\n" skills-snippet) "")))
 
 (defn- start-streaming
-  "Start a non-blocking streaming API call. Returns the stream context."
+  "Start a non-blocking streaming API call. Returns the stream context.
+   Fires :before-send hook with the conversation before sending."
   [conversation effective-prompt]
+  (hooks/run :before-send conversation)
   (ui/stream-start)
   (def stream-ctx
     (api/stream-start
@@ -121,7 +130,8 @@
       @{:on-text (fn [text]
           (ui/stream-delta text))
         :on-error (fn [err]
-          (ui/output-error (string "Stream error: " err)))}
+          (ui/output-error (string "Stream error: " err))
+          (hooks/run :on-error err))}
       effective-prompt))
   stream-ctx)
 
@@ -218,6 +228,7 @@
                   (set stream-ctx (start-streaming conversation effective-prompt))
                   (set state :streaming))
                 ([err]
+                  (hooks/run :on-error err)
                   (ui/output-error (string err)))))
             # During streaming — queue it for later
             (when (not= "" r)
@@ -245,6 +256,9 @@
                 (set stream-ctx nil)
                 (break))
 
+              # Fire :after-response hook
+              (hooks/run :after-response response)
+
               # Handle tool calls if any
               (def content (get response :content []))
               (def tool-result (handle-tool-calls content))
@@ -260,6 +274,7 @@
                       (set stream-ctx (start-streaming conversation effective-prompt))
                       (set state :streaming))
                     ([err]
+                      (hooks/run :on-error err)
                       (ui/output-error (string err))
                       (set state :idle)
                       (set stream-ctx nil))))
@@ -280,5 +295,6 @@
                         (set stream-ctx (start-streaming conversation effective-prompt))
                         (set state :streaming))
                       ([err]
+                        (hooks/run :on-error err)
                         (ui/output-error (string err))))))))))))
     ))
