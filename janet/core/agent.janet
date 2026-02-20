@@ -9,6 +9,8 @@
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
 (import core/hooks :as hooks)
+(import core/conversation :as conv)
+(import core/commands :as commands)
 
 (var- system-prompt
   `````
@@ -187,7 +189,22 @@
       (each path agents-md-files
         (ui/output-info (string "    • " path))))
 
-    (var conversation @[])
+    # Initialize conversation session
+    (def sid (conv/init))
+    (ui/output-info (string "  session: " sid))
+
+    # Wire up separator status bar
+    (ui/set-status-provider
+      (fn []
+        (string "session: " (conv/get-session-id)
+                " │ " (conv/length) " msgs"
+                " ≈ " (conv/estimate-tokens) " tokens")))
+
+    # Redraw separator when messages change
+    (hooks/add :after-message (fn [msg] (ui/draw-separator)))
+
+    # Initial separator draw with session info
+    (ui/draw-separator)
 
     # State machine
     # :idle       — waiting for user input
@@ -220,16 +237,27 @@
           (if (= state :idle)
             # Submit immediately
             (when (not= "" r)
-              (ui/output-user r)
-              (array/push conversation {:role "user" :content r})
-              (def effective-prompt (build-effective-prompt))
-              (try
+              # Check for slash commands first
+              (def cmd-result (commands/dispatch r))
+              (if (cmd-result :handled)
                 (do
-                  (set stream-ctx (start-streaming conversation effective-prompt))
-                  (set state :streaming))
-                ([err]
-                  (hooks/run :on-error err)
-                  (ui/output-error (string err)))))
+                  (ui/output-user r)
+                  (def result (cmd-result :result))
+                  (when (not= "" result)
+                    (each line (string/split "\n" result)
+                      (ui/output-info line)))
+                  (ui/draw-separator))
+                (do
+                  (ui/output-user r)
+                  (conv/push {:role "user" :content r})
+                  (def effective-prompt (build-effective-prompt))
+                  (try
+                    (do
+                      (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
+                      (set state :streaming))
+                    ([err]
+                      (hooks/run :on-error err)
+                      (ui/output-error (string err)))))))
             # During streaming — queue it for later
             (when (not= "" r)
               (set pending-input r)))))
@@ -266,12 +294,12 @@
               (if tool-result
                 (do
                   # Add assistant + tool results, start another API call
-                  (array/push conversation (tool-result 0))
-                  (array/push conversation (tool-result 1))
+                  (conv/push (tool-result 0))
+                  (conv/push (tool-result 1))
                   (def effective-prompt (build-effective-prompt))
                   (try
                     (do
-                      (set stream-ctx (start-streaming conversation effective-prompt))
+                      (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
                       (set state :streaming))
                     ([err]
                       (hooks/run :on-error err)
@@ -280,19 +308,19 @@
                       (set stream-ctx nil))))
                 (do
                   # No tool calls — response complete
-                  (array/push conversation {:role "assistant" :content content})
+                  (conv/push {:role "assistant" :content content})
                   (set state :idle)
                   (set stream-ctx nil)
 
                   # If user typed something during streaming, submit it now
                   (when pending-input
                     (ui/output-user pending-input)
-                    (array/push conversation {:role "user" :content pending-input})
+                    (conv/push {:role "user" :content pending-input})
                     (set pending-input nil)
                     (def effective-prompt (build-effective-prompt))
                     (try
                       (do
-                        (set stream-ctx (start-streaming conversation effective-prompt))
+                        (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
                         (set state :streaming))
                       ([err]
                         (hooks/run :on-error err)

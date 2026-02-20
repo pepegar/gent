@@ -12,6 +12,9 @@
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
 (import core/buffers :as buffers)
+(import core/conversation :as conv)
+(import core/commands :as commands)
+(import core/registers :as reg)
 
 # Built-in tools
 (import tools/read-file)
@@ -20,6 +23,9 @@
 (import tools/bash)
 (import tools/eval-janet)
 (import tools/use-skill)
+
+# Built-in slash commands
+(import commands/conversation)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)
