@@ -235,6 +235,22 @@
               (ui/stream-end))
             (break))
 
+          (= r :stop)
+          (when (= state :streaming)
+            # Cancel the active stream
+            (http/stream-stop)
+            (ui/stream-end)
+            (ui/output-info "— stopped —")
+            # Collect whatever partial response we have and save it
+            (def parser (stream-ctx :parser))
+            (def response (try ((parser :finish)) ([_] nil)))
+            (when (and response (get response :content))
+              (conv/push {:role "assistant" :content (get response :content)}))
+            (set state :idle)
+            (set stream-ctx nil)
+            (set pending-input nil)
+            (ui/draw-separator))
+
           (string? r)
           (if (= state :idle)
             # Submit immediately

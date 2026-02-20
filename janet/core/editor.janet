@@ -148,6 +148,12 @@
       (and ctrl (= key "u")) (clear-input)
       (and ctrl (= key "w")) (kill-word-back)
 
+      # Escape — clear input or signal stop
+      (= key :escape)
+      (if (> (length buf) 0)
+        (do (clear-input))
+        (break :stop))
+
       # Suspend (ctrl-z)
       (and ctrl (= key "z"))
       (do
