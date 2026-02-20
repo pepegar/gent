@@ -1,14 +1,5 @@
 (import core/tools :as tools)
-
-(defn- create-file [path content]
-  "Create a new file, including parent directories."
-  # Create parent directories if needed
-  (def parts (string/split "/" path))
-  (when (> (length parts) 1)
-    (def dir (string/join (array/slice parts 0 -2) "/"))
-    (os/mkdir dir))
-  (spit path content)
-  (string "Created file " path))
+(import core/buffers :as buffers)
 
 (defn- edit-file-impl [input]
   (def path (get input :path))
@@ -21,20 +12,20 @@
   (when (= old-str new-str)
     (error "old_str and new_str must be different"))
 
-  # If file doesn't exist and old_str is empty, create it
+  # If file doesn't exist and old_str is empty, create a new file
   (unless (os/stat path)
     (if (= "" old-str)
-      (break (create-file path new-str))
+      (do
+        (def buf (buffers/open path))
+        (buffers/insert buf 0 new-str)
+        (buffers/save buf)
+        (break (string "Created file " path)))
       (error (string "file not found: " path))))
 
-  # Read, replace, write
-  (def content (slurp path))
-  (def new-content (string/replace-all old-str new-str content))
-
-  (when (and (= content new-content) (not= "" old-str))
-    (error "old_str not found in file"))
-
-  (spit path new-content)
+  # Open into buffer, replace, save
+  (def buf (buffers/open path))
+  (buffers/replace-all buf old-str new-str)
+  (buffers/save buf)
   "OK")
 
 (tools/register "edit_file"

@@ -1,4 +1,5 @@
 (import core/tools :as tools)
+(import core/buffers :as buffers)
 
 # ── Image detection by magic bytes ─────────────────────────────
 
@@ -73,4 +74,6 @@
                (def media-type (detect-image-type path))
                (if media-type
                  (read-image-as-content path media-type)
-                 (slurp path)))})
+                 (do
+                   (def buf (buffers/open path))
+                   (buffers/string-content buf))))})

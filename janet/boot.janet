@@ -11,6 +11,7 @@
 (import core/agent :as agent)
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
+(import core/buffers :as buffers)
 
 # Built-in tools
 (import tools/read-file)
