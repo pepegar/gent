@@ -26,6 +26,7 @@
 
 # Built-in slash commands
 (import commands/conversation)
+(import commands/auth)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)

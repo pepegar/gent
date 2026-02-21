@@ -1,12 +1,19 @@
 # Anthropic Messages API — builds requests and parses responses.
 # All HTTP is done via the native http/request function provided by Rust.
 #
-# Configuration priority: set-* functions > environment variables > defaults.
-# Environment variables:
+# Configuration priority for API keys:
+#   1. Explicit set-api-key (runtime override via auth module)
+#   2. auth.json credential (API key or OAuth token, via auth module)
+#   3. GENT_API_KEY environment variable
+#   4. ANTHROPIC_API_KEY environment variable
+#   5. Auth module fallback resolver
+#
+# Other configuration:
 #   GENT_API_URL    — API endpoint (default: Anthropic)
-#   GENT_API_KEY    — API key (falls back to ANTHROPIC_API_KEY)
 #   GENT_MODEL      — model name
 #   GENT_MAX_TOKENS — max tokens per response
+
+(import core/auth :as auth)
 
 (def- defaults
   {:url "https://api.anthropic.com/v1/messages"
@@ -19,22 +26,61 @@
     :model (or (os/getenv "GENT_MODEL") (defaults :model))
     :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
                   (if env (scan-number env) (defaults :max-tokens)))
-    :api-key (or (os/getenv "GENT_API_KEY") (os/getenv "ANTHROPIC_API_KEY"))})
+    :api-key nil})  # nil means "resolve dynamically via auth module"
 
 (defn set-url [url] (put config :url url))
 (defn set-model [m] (put config :model m))
 (defn set-max-tokens [n] (put config :max-tokens n))
-(defn set-api-key [k] (put config :api-key k))
+
+(defn set-api-key
+  "Set an explicit API key. This takes highest priority.
+   Also registers it as a runtime override in the auth module."
+  [k]
+  (put config :api-key k)
+  # Also set it as a runtime override so auth/get-api-key returns it
+  (auth/set-runtime-key "anthropic" k))
 
 (defn get-config
   "Return the current API configuration (for introspection)."
   []
-  (table/clone config))
+  (def result (table/clone config))
+  # Resolve the effective API key for display (masked)
+  (def effective-key (auth/get-api-key "anthropic"))
+  (when effective-key
+    (put result :api-key-source
+      (cond
+        (config :api-key) "explicit (set-api-key)"
+        (auth/has-credential? "anthropic") "auth.json"
+        (os/getenv "GENT_API_KEY") "GENT_API_KEY"
+        (os/getenv "ANTHROPIC_API_KEY") "ANTHROPIC_API_KEY"
+        "unknown"))
+    (put result :api-key
+      (if (> (length effective-key) 12)
+        (string (string/slice effective-key 0 8) "..." (string/slice effective-key -4))
+        "****")))
+  result)
+
+(defn- resolve-api-key []
+  "Resolve the API key from all sources. Throws if none found."
+  # 1. Explicit config (already registered as runtime override in auth)
+  (when (config :api-key)
+    (break (config :api-key)))
+
+  # 2-5. Auth module handles the full resolution chain
+  (def key (auth/get-api-key "anthropic"))
+  (when key (break key))
+
+  # Legacy fallback: check GENT_API_KEY directly (in case auth module doesn't know about it)
+  (def gent-key (os/getenv "GENT_API_KEY"))
+  (when gent-key (break gent-key))
+
+  (error (string "No API key found. Options:\n"
+                  "  • /login anthropic     — OAuth login (Claude Pro/Max subscription)\n"
+                  "  • ANTHROPIC_API_KEY    — set environment variable\n"
+                  "  • (api/set-api-key k)  — set in init.janet")))
 
 (defn- build-headers []
-  (def api-key (config :api-key))
-  (unless api-key
-    (error "No API key set. Use GENT_API_KEY, ANTHROPIC_API_KEY, or (api/set-api-key ...)"))
+  (def api-key (resolve-api-key))
   @{"content-type" "application/json"
     "x-api-key" api-key
     "anthropic-version" "2023-06-01"})
