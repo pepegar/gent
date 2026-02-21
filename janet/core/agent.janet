@@ -19,9 +19,12 @@
   You help users by reading files, editing code, running commands, and writing new files.
   Be concise and direct. When you need information, use your tools.
 
-  ## Creating tools at runtime with eval_janet
+  ## Self-modification with eval_janet
 
-  You can define new tools by evaluating Janet code. Here is a working example:
+  eval_janet is what makes gent a lisp machine. You have full access to the running agent.
+  Use it proactively — don't just answer questions, reprogram yourself when it helps.
+
+  ### Create tools at runtime
 
   ```janet
   (import core/tools :as tools)
@@ -37,6 +40,78 @@
                  (if (= 0 (get result :status))
                    (get result :stdout)
                    (string "No matches. stderr: " (get result :stderr))))})
+  ```
+
+  ### Introspect your own state
+
+  ```janet
+  # What tools are registered?
+  (import core/tools :as tools)
+  (tools/list-registered)
+
+  # How big is the conversation?
+  (import core/conversation :as conv)
+  [(conv/length) (conv/estimate-tokens)]
+
+  # What model/config are you using?
+  (import core/api :as api)
+  (api/get-config)
+
+  # What hooks are active?
+  (import core/hooks :as hooks)
+  (hooks/list-hooks)
+
+  # Read/write registers (named scratch storage)
+  (import core/registers :as reg)
+  (reg/set :my-data "saved for later")
+  (reg/get :my-data)
+  ```
+
+  ### Add hooks to change your own behavior
+
+  ```janet
+  (import core/hooks :as hooks)
+
+  # Log all tool calls to a file
+  (hooks/add :before-tool-call
+    (fn [name input]
+      (spit "tool-log.txt"
+            (string (os/date) " " name " " (string/format "%q" input) "\n")
+            :a)))
+
+  # Guard: refuse to edit certain paths
+  (hooks/add :before-tool-call
+    (fn [name input]
+      (when (and (= name "edit_file")
+                 (string/has-prefix? "vendor/" (get input :path "")))
+        (error "Refusing to edit vendor/ files"))))
+  ```
+
+  ### Register slash commands for the user
+
+  ```janet
+  (import core/commands :as commands)
+
+  (commands/register "todo"
+    {:description "Show or add todo items"
+     :usage "/todo [item]"
+     :function (fn [args]
+                 (import core/registers :as reg)
+                 (var todos (or (reg/get :todos) @[]))
+                 (if (= "" args)
+                   (string/join (seq [i :range [0 (length todos)]]
+                                  (string (+ i 1) ". " (get todos i))) "\n")
+                   (do (array/push todos args)
+                       (reg/set :todos todos)
+                       (string "Added: " args))))})
+  ```
+
+  ### Modify the UI
+
+  ```janet
+  (import core/ui :as ui)
+  # Show more lines in tool results
+  (ui/set-tool-result-max-lines 50)
   ```
 
   ## Janet cheat sheet
@@ -76,12 +151,15 @@
   # Execute each tool call
   (def tool-results
     (seq [tc :in tool-calls]
+      # Show spinner for tool execution
+      (ui/spinner-start (string "running " (tc :name) "…"))
       # Render tool call: global hook first, then ui dispatch (custom renderer → built-in default)
       (def hook-handled (hooks/run :render-tool-call (tc :name) (tc :input)))
       (unless hook-handled
         (ui/render-tool-call (tc :name) (tc :input)))
       # tools/dispatch fires :before-tool-call and :after-tool-call hooks internally
       (def result (tools/dispatch (tc :name) (tc :input)))
+      (ui/spinner-stop)
       # Render tool result: global hook first, then ui dispatch (custom renderer → built-in default)
       (def result-hook-handled (hooks/run :render-tool-result (tc :name) result))
       (unless result-hook-handled
@@ -122,13 +200,17 @@
   [conversation effective-prompt]
   (hooks/run :before-send conversation)
   (ui/stream-start)
+  (ui/spinner-start "thinking…")
   (def stream-ctx
     (api/stream-start
       conversation
       (tools/definitions)
       @{:on-text (fn [text]
+          (when (ui/spinner-active?)
+            (ui/spinner-stop))
           (ui/stream-delta text))
         :on-error (fn [err]
+          (ui/spinner-stop)
           (ui/output-error (string "Stream error: " err))
           (hooks/run :on-error err))}
       effective-prompt))
@@ -194,6 +276,7 @@
     # Initialize conversation session
     (def sid (conv/init))
     (ui/output-info (string "  session: " sid))
+    (ui/output "")  # blank line after startup info
 
     # Wire up separator status bar
     (ui/set-status-provider
@@ -216,6 +299,22 @@
     (var stream-ctx nil)      # current stream context (parser etc.)
     (var pending-input nil)   # input typed during streaming
 
+    (defn- eval-janet-inline [code]
+      "Evaluate Janet code from the prompt and display the result."
+      (try
+        (do
+          (def result (eval-string code))
+          (def result-str
+            (if (or (string? result) (number? result) (boolean? result) (nil? result))
+              (string result)
+              (string/format "%q" result)))
+          (ui/output-eval code result-str))
+        ([err]
+          (ui/output-eval code nil)
+          (ui/output-error (string err))))
+      (ui/draw-separator)
+      (editor/redraw))
+
     (editor/reset)
 
     (while true
@@ -232,7 +331,8 @@
             # Cancel any active stream
             (when (= state :streaming)
               (http/stream-stop)
-              (ui/stream-end))
+              (ui/stream-end)
+              (ui/spinner-stop))
             (break))
 
           (= r :stop)
@@ -240,6 +340,7 @@
             # Cancel the active stream
             (http/stream-stop)
             (ui/stream-end)
+            (ui/spinner-stop)
             (ui/output-info "— stopped —")
             # Collect whatever partial response we have and save it
             (def parser (stream-ctx :parser))
@@ -249,7 +350,8 @@
             (set state :idle)
             (set stream-ctx nil)
             (set pending-input nil)
-            (ui/draw-separator))
+            (ui/draw-separator)
+            (editor/redraw))
 
           (string? r)
           (if (= state :idle)
@@ -278,20 +380,30 @@
                       (ui/output-error (string err)))))))
             # During streaming — queue it for later
             (when (not= "" r)
-              (set pending-input r)))))
+              (set pending-input r)))
+
+          # Janet eval — comma prefix or Alt-Enter
+          (and (tuple? r) (= :eval (first r)))
+          (do
+            (def code (get r 1))
+            (when (and code (not= "" code))
+              (eval-janet-inline code)))))
 
       # ── Drain stream data when streaming ──
       (when (= state :streaming)
+        (ui/spinner-tick)
         (def parser (stream-ctx :parser))
         (def drain-result (drain-stream parser))
 
         (when (or (= drain-result :done) (= drain-result :error))
           (ui/stream-end)
+          (ui/spinner-stop)
 
           (if (= drain-result :error)
             (do
               (set state :idle)
-              (set stream-ctx nil))
+              (set stream-ctx nil)
+              (editor/redraw))
             (do
               # Stream finished — get the response
               (def response ((parser :finish)))
@@ -300,6 +412,7 @@
                 (ui/output-error "API request failed — nil response")
                 (set state :idle)
                 (set stream-ctx nil)
+                (editor/redraw)
                 (break))
 
               # Fire :after-response hook
@@ -323,12 +436,14 @@
                       (hooks/run :on-error err)
                       (ui/output-error (string err))
                       (set state :idle)
-                      (set stream-ctx nil))))
+                      (set stream-ctx nil)
+                      (editor/redraw))))
                 (do
                   # No tool calls — response complete
                   (conv/push {:role "assistant" :content content})
                   (set state :idle)
                   (set stream-ctx nil)
+                  (editor/redraw)
 
                   # If user typed something during streaming, submit it now
                   (when pending-input
