@@ -116,3 +116,27 @@
 
   (array/push parts "\x1b[0m")
   (string ;parts))
+
+(defn buffer->rows
+  "Convert the buffer to an array of ANSI-styled row strings (no cursor movement).
+   Each element is one row, ready to be printed line-by-line."
+  [buf]
+  (def a (buf :area))
+  (def rows @[])
+
+  (for row 0 (a :height)
+    (def parts @[])
+    (var cur-style nil)
+    (for col 0 (a :width)
+      (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
+      (def st (c :style))
+      (when (not (deep= st cur-style))
+        (array/push parts "\x1b[0m")
+        (def sgr (style->sgr st))
+        (when (not= sgr "") (array/push parts sgr))
+        (set cur-style st))
+      (array/push parts (c :ch)))
+    (array/push parts "\x1b[0m")
+    (array/push rows (string ;parts)))
+
+  rows)
