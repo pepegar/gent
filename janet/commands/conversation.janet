@@ -89,3 +89,19 @@
    :function (fn [args]
      (string "Messages: " (conv/length) "\n"
              "Estimated tokens: ~" (conv/estimate-tokens)))})
+
+(commands/register "eval"
+  {:description "Evaluate Janet code inline"
+   :usage "/eval (+ 1 2)"
+   :function (fn [args]
+     (def code (string/trim args))
+     (when (= "" code)
+       (break "Usage: /eval <janet-code>\nTip: use ,<code> as a shortcut"))
+     (try
+       (do
+         (def result (eval-string code))
+         (if (or (string? result) (number? result) (boolean? result) (nil? result))
+           (string "=> " result)
+           (string "=> " (string/format "%q" result))))
+       ([err]
+         (string "Error: " err))))})

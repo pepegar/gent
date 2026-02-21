@@ -285,6 +285,43 @@
   (put stream-state :active false)
   (put stream-state :first true))
 
+# ── Spinner ─────────────────────────────────────────────────────
+# An animated spinner shown on the input row while the agent is thinking
+# or running tools. Replaces the editor prompt; editor/redraw restores it.
+
+(def- spinner-frames ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"])
+(var- spinner-state @{:active false :frame 0 :message ""})
+
+(defn spinner-start [msg]
+  "Start the spinner with a message (e.g. \"thinking…\")."
+  (put spinner-state :active true)
+  (put spinner-state :frame 0)
+  (put spinner-state :message msg)
+  (def frame (get spinner-frames 0))
+  (term/write (move-to (layout :input-row) 1))
+  (term/write (clear-line))
+  (term/write (string (color :separator) " " frame " " msg (color :reset))))
+
+(defn spinner-active? []
+  "Return true if the spinner is currently running."
+  (spinner-state :active))
+
+(defn spinner-tick []
+  "Advance the spinner animation by one frame. Call from the event loop."
+  (when (spinner-state :active)
+    (put spinner-state :frame (% (+ (spinner-state :frame) 1) (length spinner-frames)))
+    (def frame (get spinner-frames (spinner-state :frame)))
+    (term/write (move-to (layout :input-row) 1))
+    (term/write (clear-line))
+    (term/write (string (color :separator) " " frame " " (spinner-state :message) (color :reset)))))
+
+(defn spinner-stop []
+  "Stop the spinner and clear the input row."
+  (when (spinner-state :active)
+    (put spinner-state :active false)
+    (term/write (move-to (layout :input-row) 1))
+    (term/write (clear-line))))
+
 (defn output-tool [name &opt detail]
   (def msg (if detail
              (string (color :tool-label) "  ▸ " name (color :reset) " " (color :separator) detail (color :reset))
@@ -452,6 +489,17 @@
 
 (defn output-error [text]
   (output (string (color :error-label) " error " (color :reset) " " text)))
+
+(defn output-eval [code result]
+  "Display an inline Janet eval: the code and its result."
+  (def max-width (max 20 (- (layout :cols) 8)))
+  (output (string (color :tool-label) " eval " (color :reset) " " (color :separator) code (color :reset)))
+  (when (and result (not= "" result))
+    (each line (string/split "\n" result)
+      (def truncated (if (> (length line) max-width)
+                       (string (string/slice line 0 (- max-width 1)) "…")
+                       line))
+      (output (string "    " (color :tool-label) "=> " (color :reset) truncated)))))
 
 (defn output-info [text]
   (output (string (color :separator) text (color :reset))))
