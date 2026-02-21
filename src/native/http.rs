@@ -44,11 +44,17 @@ fn request(args: &mut [Janet]) -> Janet {
     let method_str = std::str::from_utf8(method.as_bytes()).expect("method is not UTF-8");
     let url_str = std::str::from_utf8(url.as_bytes()).expect("url is not UTF-8");
 
+    // Build agent with timeouts (30s connect, 60s read)
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .timeout_read(std::time::Duration::from_secs(60))
+        .build();
+
     let mut req = match method_str {
-        "GET" => ureq::get(url_str),
-        "POST" => ureq::post(url_str),
-        "PUT" => ureq::put(url_str),
-        "DELETE" => ureq::delete(url_str),
+        "GET" => agent.get(url_str),
+        "POST" => agent.post(url_str),
+        "PUT" => agent.put(url_str),
+        "DELETE" => agent.delete(url_str),
         _ => panic!("http/request: unsupported method {}", method_str),
     };
 
@@ -130,11 +136,16 @@ fn stream(args: &mut [Janet]) -> Janet {
     let method_str = std::str::from_utf8(method.as_bytes()).expect("method is not UTF-8");
     let url_str = std::str::from_utf8(url.as_bytes()).expect("url is not UTF-8");
 
+    // Build agent with timeouts (30s connect, no read timeout for streaming)
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .build();
+
     let mut req = match method_str {
-        "GET" => ureq::get(url_str),
-        "POST" => ureq::post(url_str),
-        "PUT" => ureq::put(url_str),
-        "DELETE" => ureq::delete(url_str),
+        "GET" => agent.get(url_str),
+        "POST" => agent.post(url_str),
+        "PUT" => agent.put(url_str),
+        "DELETE" => agent.delete(url_str),
         _ => panic!("http/stream: unsupported method {}", method_str),
     };
 
@@ -255,11 +266,16 @@ fn stream_start(args: &mut [Janet]) -> Janet {
 
     // Spawn background thread
     std::thread::spawn(move || {
+        // Build agent with timeouts (30s connect, no read timeout for streaming)
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(30))
+            .build();
+
         let mut req = match method_str.as_str() {
-            "GET" => ureq::get(&url_str),
-            "POST" => ureq::post(&url_str),
-            "PUT" => ureq::put(&url_str),
-            "DELETE" => ureq::delete(&url_str),
+            "GET" => agent.get(&url_str),
+            "POST" => agent.post(&url_str),
+            "PUT" => agent.put(&url_str),
+            "DELETE" => agent.delete(&url_str),
             _ => {
                 let _ = tx.send(StreamEvent::Error(format!("unsupported method {}", method_str)));
                 return;
