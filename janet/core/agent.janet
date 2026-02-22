@@ -12,6 +12,7 @@
 (import core/conversation :as conv)
 (import core/commands :as commands)
 (import core/registers :as reg)
+(import core/abort :as abort)
 
 (var- system-prompt
   `````
@@ -137,48 +138,40 @@
   [prompt]
   (set system-prompt prompt))
 
-(defn- handle-tool-calls
-  "Execute tool calls from the response content blocks. Returns [assistant-msg tool-results] or nil."
-  [content]
-  (def tool-calls (filter |(= "tool_use" ($ :type)) content))
+# ── Tool execution state ──────────────────────────────────────────
+# Tracks async tool execution during the :tools state.
 
-  (when (empty? tool-calls)
-    (break nil))
+(var- tool-exec @{:tool-calls @[]
+                  :content nil
+                  :current-idx 0
+                  :results @[]
+                  :async-handle nil})
 
-  # Build the assistant message to add to conversation
-  (def assistant-msg {:role "assistant" :content content})
+(defn- reset-tool-exec
+  "Reset tool execution state for a new batch of tool calls."
+  [tool-calls content]
+  (abort/clear-abort!)
+  (put tool-exec :tool-calls tool-calls)
+  (put tool-exec :content content)
+  (put tool-exec :current-idx 0)
+  (put tool-exec :results @[])
+  (put tool-exec :async-handle nil))
 
-  # Execute each tool call
-  (def tool-results
-    (seq [tc :in tool-calls]
-      # Show spinner for tool execution
-      (ui/spinner-start (string "running " (tc :name) "…"))
-      # Render tool call: global hook first, then ui dispatch (custom renderer → built-in default)
-      (def hook-handled (hooks/run :render-tool-call (tc :name) (tc :input)))
-      (unless hook-handled
-        (ui/render-tool-call (tc :name) (tc :input)))
-      # tools/dispatch fires :before-tool-call and :after-tool-call hooks internally
-      (def result (tools/dispatch (tc :name) (tc :input)))
-      (ui/spinner-stop)
-      # Render tool result: global hook first, then ui dispatch (custom renderer → built-in default)
-      (def result-hook-handled (hooks/run :render-tool-result (tc :name) result))
-      (unless result-hook-handled
-        (ui/render-tool-result (tc :name) result))
-      # Build the tool_result message for the API
-      (if (or (table? result) (array? result) (tuple? result))
-        (do
-          (def content-arr
-            (if (or (array? result) (tuple? result))
-              result
-              @[result]))
-          {:type "tool_result"
-           :tool_use_id (tc :id)
-           :content content-arr})
-        {:type "tool_result"
-         :tool_use_id (tc :id)
-         :content (string result)})))
-
-  [assistant-msg {:role "user" :content tool-results}])
+(defn- tool-result-msg
+  "Build a tool_result message for the API."
+  [tool-use-id result]
+  (if (or (table? result) (array? result) (tuple? result))
+    (do
+      (def content-arr
+        (if (or (array? result) (tuple? result))
+          result
+          @[result]))
+      {:type "tool_result"
+       :tool_use_id tool-use-id
+       :content content-arr})
+    {:type "tool_result"
+     :tool_use_id tool-use-id
+     :content (string result)}))
 
 (defn- print-text-response [response]
   (def content (get response :content []))
@@ -219,11 +212,11 @@
 (defn- drain-stream
   "Read all available stream lines (non-blocking). Returns :done when stream ends,
    :error on error, or nil when no more data is available right now."
-  [parser]
+  [parser &opt stream-id]
   (var result nil)
   (var keep-going true)
   (while keep-going
-    (def line (http/stream-read))
+    (def line (http/stream-read stream-id))
     (cond
       # No data available — return to the event loop
       (nil? line)
@@ -294,10 +287,14 @@
     # State machine
     # :idle       — waiting for user input
     # :streaming  — API stream active, receiving SSE data
-    # :tools      — executing tool calls (synchronous)
+    # :tools      — executing tool calls (async polling for bash, sync for others)
     (var state :idle)
     (var stream-ctx nil)      # current stream context (parser etc.)
-    (var pending-input nil)   # input typed during streaming
+    # Steering / follow-up queues (à la pi)
+    # - steering-queue: messages typed during :tools → interrupt, skip remaining tools
+    # - followup-queue: messages typed during :streaming → wait until turn finishes
+    (var steering-queue @[])
+    (var followup-queue @[])
 
     (defn- eval-janet-inline [code]
       "Evaluate Janet code from the prompt and display the result."
@@ -315,10 +312,116 @@
       (ui/draw-separator)
       (editor/redraw))
 
+    (defn- start-next-tool []
+      "Start executing the next tool in the queue. If all tools are done,
+       push results to conversation and start a new stream.
+       Checks abort flag — if set, skips remaining tools."
+      (def idx (tool-exec :current-idx))
+
+      # Check abort flag — skip remaining tools
+      (when (abort/aborted?)
+        (ui/spinner-stop)
+        (ui/output-info "— remaining tools skipped —")
+        (def assistant-msg {:role "assistant" :content (tool-exec :content)})
+        (def tool-msg {:role "user" :content (tool-exec :results)})
+        (conv/push assistant-msg)
+        (when (not (empty? (tool-exec :results)))
+          (conv/push tool-msg))
+
+        # Process steering messages — user input that interrupted tools
+        (if (not (empty? steering-queue))
+          (do
+            (def steer-msg (string/join steering-queue "\n"))
+            (array/clear steering-queue)
+            (ui/output-user steer-msg)
+            (conv/push {:role "user" :content steer-msg})
+            (def effective-prompt (build-effective-prompt))
+            (try
+              (do
+                (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
+                (set state :streaming))
+              ([err]
+                (hooks/run :on-error err)
+                (ui/output-error (string err))
+                (set state :idle)
+                (set stream-ctx nil)
+                (editor/redraw))))
+          (do
+            (set state :idle)
+            (set stream-ctx nil)
+            (editor/redraw)))
+        (break))
+
+      (if (>= idx (length (tool-exec :tool-calls)))
+        # ── All tools done ──
+        (do
+          (def assistant-msg {:role "assistant" :content (tool-exec :content)})
+          (def tool-msg {:role "user" :content (tool-exec :results)})
+          (conv/push assistant-msg)
+          (conv/push tool-msg)
+          (def effective-prompt (build-effective-prompt))
+          (try
+            (do
+              (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
+              (set state :streaming))
+            ([err]
+              (hooks/run :on-error err)
+              (ui/output-error (string err))
+              (set state :idle)
+              (set stream-ctx nil)
+              (editor/redraw))))
+
+        # ── Execute current tool ──
+        (do
+          (def tc (get (tool-exec :tool-calls) idx))
+          (def name (tc :name))
+          (def input (tc :input))
+
+          (ui/spinner-start (string "running " name "…"))
+
+          # Render tool call (hook then fallback)
+          (def hook-handled (hooks/run :render-tool-call name input))
+          (unless hook-handled
+            (ui/render-tool-call name input))
+
+          # Dispatch the tool — may return sync result or async handle
+          (def result (tools/dispatch name input))
+
+          (if (tools/async? result)
+            # ── Async tool execution — store handle, poll in event loop ──
+            (put tool-exec :async-handle result)
+
+            # ── Sync result — render immediately and move to next tool ──
+            (do
+              (ui/spinner-stop)
+              (def result-hook-handled (hooks/run :render-tool-result name result))
+              (unless result-hook-handled
+                (ui/render-tool-result name result))
+              (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
+              (put tool-exec :current-idx (+ idx 1))
+              # Recurse to start next tool immediately (sync tools are fast)
+              (start-next-tool))))))
+
+    (defn- finish-current-async-tool [result]
+      "Called when the current async tool completes with a result string."
+      (def idx (tool-exec :current-idx))
+      (def tc (get (tool-exec :tool-calls) idx))
+
+      (hooks/run :after-tool-call (tc :name) (tc :input) result)
+      (ui/spinner-stop)
+      (def result-hook-handled (hooks/run :render-tool-result (tc :name) result))
+      (unless result-hook-handled
+        (ui/render-tool-result (tc :name) result))
+
+      (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
+      (put tool-exec :async-handle nil)
+      (put tool-exec :current-idx (+ idx 1))
+      (start-next-tool))
+
     (editor/reset)
 
     (while true
-      # ── Poll terminal events (short timeout when streaming, block when idle) ──
+      # ── Poll terminal events (short timeout when streaming/tools, block when idle) ──
       (def timeout (if (= state :idle) nil 16))
       (def ev (term/read-event timeout))
 
@@ -328,30 +431,55 @@
         (cond
           (= r :quit)
           (do
-            # Cancel any active stream
+            # Cancel any active stream or process
             (when (= state :streaming)
-              (http/stream-stop)
+              (http/stream-stop (get stream-ctx :stream-id))
               (ui/stream-end)
+              (ui/spinner-stop))
+            (when (= state :tools)
+              (when (tool-exec :async-handle)
+                ((get (tool-exec :async-handle) :cancel)))
               (ui/spinner-stop))
             (break))
 
           (= r :stop)
-          (when (= state :streaming)
-            # Cancel the active stream
-            (http/stream-stop)
-            (ui/stream-end)
-            (ui/spinner-stop)
-            (ui/output-info "— stopped —")
-            # Collect whatever partial response we have and save it
-            (def parser (stream-ctx :parser))
-            (def response (try ((parser :finish)) ([_] nil)))
-            (when (and response (get response :content))
-              (conv/push {:role "assistant" :content (get response :content)}))
-            (set state :idle)
-            (set stream-ctx nil)
-            (set pending-input nil)
-            (ui/draw-separator)
-            (editor/redraw))
+          (cond
+            (= state :streaming)
+            (do
+              # Cancel the active stream
+              (http/stream-stop (get stream-ctx :stream-id))
+              (ui/stream-end)
+              (ui/spinner-stop)
+              (ui/output-info "— stopped —")
+              # Collect whatever partial response we have and save it
+              (def parser (stream-ctx :parser))
+              (def response (try ((parser :finish)) ([_] nil)))
+              (when (and response (get response :content))
+                (conv/push {:role "assistant" :content (get response :content)}))
+              (set state :idle)
+              (set stream-ctx nil)
+              (array/clear followup-queue)
+              (ui/draw-separator)
+              (editor/redraw))
+
+            (= state :tools)
+            (do
+              # Set abort flag so remaining tools are skipped
+              (abort/abort!)
+              # Cancel running async tool if active
+              (when (tool-exec :async-handle)
+                ((get (tool-exec :async-handle) :cancel))
+                (put tool-exec :async-handle nil))
+              (ui/spinner-stop)
+              (ui/output-info "— tools cancelled —")
+              # Save partial results: push assistant message with content so far
+              (conv/push {:role "assistant" :content (tool-exec :content)})
+              (set state :idle)
+              (set stream-ctx nil)
+              (array/clear steering-queue)
+              (array/clear followup-queue)
+              (ui/draw-separator)
+              (editor/redraw)))
 
           (string? r)
           (if (= state :idle)
@@ -378,9 +506,20 @@
                     ([err]
                       (hooks/run :on-error err)
                       (ui/output-error (string err)))))))
-            # During streaming — queue it for later
+            # During streaming — queue for follow-up after turn
+            # During tools — queue for steering (interrupt tool execution)
             (when (not= "" r)
-              (set pending-input r)))
+              (if (= state :tools)
+                (do
+                  (array/push steering-queue r)
+                  # Trigger abort to skip remaining tools
+                  (abort/abort!)
+                  (when (tool-exec :async-handle)
+                    ((get (tool-exec :async-handle) :cancel))
+                    (put tool-exec :async-handle nil))
+                  (ui/spinner-stop)
+                  (ui/output-info "— interrupted by user input —"))
+                (array/push followup-queue r))))
 
           # Janet eval — comma prefix or Alt-Enter
           (and (tuple? r) (= :eval (first r)))
@@ -393,7 +532,7 @@
       (when (= state :streaming)
         (ui/spinner-tick)
         (def parser (stream-ctx :parser))
-        (def drain-result (drain-stream parser))
+        (def drain-result (drain-stream parser (get stream-ctx :stream-id)))
 
         (when (or (= drain-result :done) (= drain-result :error))
           (ui/stream-end)
@@ -418,26 +557,16 @@
               # Fire :after-response hook
               (hooks/run :after-response response)
 
-              # Handle tool calls if any
+              # Check for tool calls
               (def content (get response :content []))
-              (def tool-result (handle-tool-calls content))
+              (def tool-calls (filter |(= "tool_use" ($ :type)) content))
 
-              (if tool-result
+              (if (not (empty? tool-calls))
                 (do
-                  # Add assistant + tool results, start another API call
-                  (conv/push (tool-result 0))
-                  (conv/push (tool-result 1))
-                  (def effective-prompt (build-effective-prompt))
-                  (try
-                    (do
-                      (set stream-ctx (start-streaming (conv/get-messages) effective-prompt))
-                      (set state :streaming))
-                    ([err]
-                      (hooks/run :on-error err)
-                      (ui/output-error (string err))
-                      (set state :idle)
-                      (set stream-ctx nil)
-                      (editor/redraw))))
+                  # Enter :tools state — execute tools asynchronously
+                  (reset-tool-exec tool-calls content)
+                  (set state :tools)
+                  (start-next-tool))
                 (do
                   # No tool calls — response complete
                   (conv/push {:role "assistant" :content content})
@@ -445,11 +574,12 @@
                   (set stream-ctx nil)
                   (editor/redraw)
 
-                  # If user typed something during streaming, submit it now
-                  (when pending-input
-                    (ui/output-user pending-input)
-                    (conv/push {:role "user" :content pending-input})
-                    (set pending-input nil)
+                  # If user typed something during streaming, submit the follow-up
+                  (when (not (empty? followup-queue))
+                    (def followup (string/join followup-queue "\n"))
+                    (array/clear followup-queue)
+                    (ui/output-user followup)
+                    (conv/push {:role "user" :content followup})
                     (def effective-prompt (build-effective-prompt))
                     (try
                       (do
@@ -457,5 +587,29 @@
                         (set state :streaming))
                       ([err]
                         (hooks/run :on-error err)
-                        (ui/output-error (string err))))))))))))
-    ))
+                        (ui/output-error (string err)))))))))))
+
+      # ── Poll tool execution when in :tools state ──
+      (when (= state :tools)
+        (ui/spinner-tick)
+        (when (tool-exec :async-handle)
+          (def poll-result ((get (tool-exec :async-handle) :poll)))
+          (when poll-result
+            (def [event-type event-data] poll-result)
+            (cond
+              (= event-type :done)
+              (finish-current-async-tool event-data)
+
+              (= event-type :error)
+              (do
+                (def idx (tool-exec :current-idx))
+                (def tc (get (tool-exec :tool-calls) idx))
+                (def result (string "Error: " event-data))
+                (hooks/run :after-tool-call (tc :name) (tc :input) result)
+                (ui/spinner-stop)
+                (ui/render-tool-result (tc :name) result)
+                (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
+                (put tool-exec :async-handle nil)
+                (put tool-exec :current-idx (+ idx 1))
+                (start-next-tool))))))
+    )))
