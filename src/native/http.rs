@@ -1,7 +1,9 @@
 use janetrs::{client::JanetClient, env::CFunOptions, Janet, JanetString, JanetKeyword, JanetTable};
+use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-// ── Background stream state ──────────────────────────────────────────────
+// ── Stream registry ──────────────────────────────────────────────
 
 enum StreamEvent {
     Line(String),
@@ -9,7 +11,15 @@ enum StreamEvent {
     Error(String),
 }
 
-static STREAM_RX: Mutex<Option<mpsc::Receiver<StreamEvent>>> = Mutex::new(None);
+static NEXT_STREAM_ID: AtomicU64 = AtomicU64::new(1);
+static STREAMS: Mutex<Option<HashMap<u64, mpsc::Receiver<StreamEvent>>>> = Mutex::new(None);
+
+fn init_streams() {
+    let mut guard = STREAMS.lock().unwrap();
+    if guard.is_none() {
+        *guard = Some(HashMap::new());
+    }
+}
 
 /// Extract a string from a Janet value (string or keyword).
 fn janet_val_to_str(val: Janet, ctx: &str) -> String {
@@ -22,69 +32,59 @@ fn janet_val_to_str(val: Janet, ctx: &str) -> String {
     }
 }
 
+/// Collect headers from a Janet table or struct into owned (key, value) pairs.
+fn collect_headers(headers_val: Janet) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    if headers_val.is_nil() {
+        return pairs;
+    }
+    if let Ok(headers) = headers_val.try_unwrap::<janetrs::JanetTable>() {
+        for (k, v) in headers.iter() {
+            pairs.push((janet_val_to_str(*k, "header key"), janet_val_to_str(*v, "header value")));
+        }
+    } else if let Ok(headers) = headers_val.try_unwrap::<janetrs::JanetStruct>() {
+        for (k, v) in headers.iter() {
+            pairs.push((janet_val_to_str(*k, "header key"), janet_val_to_str(*v, "header value")));
+        }
+    } else {
+        panic!("headers must be a table or struct");
+    }
+    pairs
+}
+
+/// Build a ureq request with method, URL, and headers.
+fn build_request(agent: &ureq::Agent, method: &str, url: &str, headers: &[(String, String)]) -> ureq::Request {
+    let mut req = match method {
+        "GET" => agent.get(url),
+        "POST" => agent.post(url),
+        "PUT" => agent.put(url),
+        "DELETE" => agent.delete(url),
+        _ => panic!("unsupported HTTP method: {}", method),
+    };
+    for (key, val) in headers {
+        req = req.set(key, val);
+    }
+    req
+}
+
 /// (http/request method url headers body)
 /// Blocking HTTP request. Returns response body as a string.
-///
-/// - method: string ("GET", "POST", etc.)
-/// - url: string
-/// - headers: janet table {:header-name "value" ...}
-/// - body: string or nil
-///
-/// Returns: string (response body)
-///
-/// This is the blocking variant. The async variant (http/stream-to) will push
-/// SSE chunks into a Janet ev/chan from a background thread.
 #[janetrs::janet_fn(arity(fix(4)))]
 fn request(args: &mut [Janet]) -> Janet {
     let method: JanetString = args[0].try_unwrap().expect("http/request: method must be a string");
     let url: JanetString = args[1].try_unwrap().expect("http/request: url must be a string");
-    // args[2] = headers table
-    // args[3] = body string or nil
 
     let method_str = std::str::from_utf8(method.as_bytes()).expect("method is not UTF-8");
     let url_str = std::str::from_utf8(url.as_bytes()).expect("url is not UTF-8");
 
-    // Build agent with timeouts (30s connect, 60s read)
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(30))
         .timeout_read(std::time::Duration::from_secs(60))
         .build();
 
-    let mut req = match method_str {
-        "GET" => agent.get(url_str),
-        "POST" => agent.post(url_str),
-        "PUT" => agent.put(url_str),
-        "DELETE" => agent.delete(url_str),
-        _ => panic!("http/request: unsupported method {}", method_str),
-    };
+    let headers = collect_headers(args[2]);
+    let req = build_request(&agent, method_str, url_str, &headers);
 
-    // Extract headers from Janet table or struct
-    if !args[2].is_nil() {
-        // Collect header pairs — handles both tables and structs
-        let mut header_pairs: Vec<(String, String)> = Vec::new();
-
-        if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetTable>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetStruct>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else {
-            panic!("http/request: headers must be a table or struct");
-        }
-
-        for (key, val) in &header_pairs {
-            req = req.set(key, val);
-        }
-    }
-
-    // Send request with optional body
     let response = if args[3].is_nil() {
         req.call()
     } else {
@@ -111,70 +111,25 @@ fn request(args: &mut [Janet]) -> Janet {
 }
 
 /// (http/stream method url headers body callback)
-/// Streaming HTTP request. Reads the response body line-by-line and calls
-/// `callback` with each line as a Janet string.
-///
-/// - method: string ("GET", "POST", etc.)
-/// - url: string
-/// - headers: janet table {:header-name "value" ...}
-/// - body: string or nil
-/// - callback: janet function — called with (callback line) for each line
-///
-/// Returns: true on success, nil on error.
-///
-/// This is the key primitive for SSE streaming from LLMs.
+/// Blocking streaming HTTP request. Reads response line-by-line, calls callback.
 #[janetrs::janet_fn(arity(fix(5)))]
 fn stream(args: &mut [Janet]) -> Janet {
     use std::io::BufRead;
 
     let method: JanetString = args[0].try_unwrap().expect("http/stream: method must be a string");
     let url: JanetString = args[1].try_unwrap().expect("http/stream: url must be a string");
-    // args[2] = headers table
-    // args[3] = body string or nil
     let callback: janetrs::JanetFunction = args[4].try_unwrap().expect("http/stream: callback must be a function");
 
     let method_str = std::str::from_utf8(method.as_bytes()).expect("method is not UTF-8");
     let url_str = std::str::from_utf8(url.as_bytes()).expect("url is not UTF-8");
 
-    // Build agent with timeouts (30s connect, no read timeout for streaming)
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(30))
         .build();
 
-    let mut req = match method_str {
-        "GET" => agent.get(url_str),
-        "POST" => agent.post(url_str),
-        "PUT" => agent.put(url_str),
-        "DELETE" => agent.delete(url_str),
-        _ => panic!("http/stream: unsupported method {}", method_str),
-    };
+    let headers = collect_headers(args[2]);
+    let req = build_request(&agent, method_str, url_str, &headers);
 
-    // Extract headers from Janet table or struct
-    if !args[2].is_nil() {
-        let mut header_pairs: Vec<(String, String)> = Vec::new();
-
-        if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetTable>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetStruct>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else {
-            panic!("http/stream: headers must be a table or struct");
-        }
-
-        for (key, val) in &header_pairs {
-            req = req.set(key, val);
-        }
-    }
-
-    // Send request with optional body
     let response = if args[3].is_nil() {
         req.call()
     } else {
@@ -192,7 +147,6 @@ fn stream(args: &mut [Janet]) -> Janet {
                 match line_result {
                     Ok(line) => {
                         let janet_line = Janet::from(JanetString::new(line.as_bytes()));
-                        // Call the Janet callback with this line
                         let mut cb = callback.clone();
                         let _ = cb.call(&mut [janet_line]);
                     }
@@ -214,41 +168,23 @@ fn stream(args: &mut [Janet]) -> Janet {
 }
 
 /// (http/stream-start method url headers body)
-/// Start an HTTP request in a background thread. Response lines are buffered
-/// and can be read non-blockingly with http/stream-read.
+/// Start an HTTP request in a background thread. Returns a stream-id (number)
+/// that can be used with http/stream-read and http/stream-stop.
 ///
-/// Returns true on success (request started), nil on error.
+/// Returns: stream-id (number) on success, nil on error.
 #[janetrs::janet_fn(arity(fix(4)))]
 fn stream_start(args: &mut [Janet]) -> Janet {
     use std::io::BufRead;
+
+    init_streams();
 
     let method: JanetString = args[0].try_unwrap().expect("http/stream-start: method must be a string");
     let url: JanetString = args[1].try_unwrap().expect("http/stream-start: url must be a string");
 
     let method_str = String::from_utf8_lossy(method.as_bytes()).into_owned();
     let url_str = String::from_utf8_lossy(url.as_bytes()).into_owned();
+    let header_pairs = collect_headers(args[2]);
 
-    // Collect headers into owned strings
-    let mut header_pairs: Vec<(String, String)> = Vec::new();
-    if !args[2].is_nil() {
-        if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetTable>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else if let Ok(headers) = args[2].try_unwrap::<janetrs::JanetStruct>() {
-            for (k, v) in headers.iter() {
-                let key = janet_val_to_str(*k, "header key");
-                let val = janet_val_to_str(*v, "header value");
-                header_pairs.push((key, val));
-            }
-        } else {
-            panic!("http/stream-start: headers must be a table or struct");
-        }
-    }
-
-    // Collect body into owned string
     let body_str: Option<String> = if args[3].is_nil() {
         None
     } else {
@@ -256,35 +192,24 @@ fn stream_start(args: &mut [Janet]) -> Janet {
         Some(String::from_utf8_lossy(body.as_bytes()).into_owned())
     };
 
+    let stream_id = NEXT_STREAM_ID.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = mpsc::channel();
 
-    // Store the receiver globally
+    // Store the receiver in the registry
     {
-        let mut guard = STREAM_RX.lock().unwrap();
-        *guard = Some(rx);
+        let mut guard = STREAMS.lock().unwrap();
+        if let Some(ref mut map) = *guard {
+            map.insert(stream_id, rx);
+        }
     }
 
     // Spawn background thread
     std::thread::spawn(move || {
-        // Build agent with timeouts (30s connect, no read timeout for streaming)
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(std::time::Duration::from_secs(30))
             .build();
 
-        let mut req = match method_str.as_str() {
-            "GET" => agent.get(&url_str),
-            "POST" => agent.post(&url_str),
-            "PUT" => agent.put(&url_str),
-            "DELETE" => agent.delete(&url_str),
-            _ => {
-                let _ = tx.send(StreamEvent::Error(format!("unsupported method {}", method_str)));
-                return;
-            }
-        };
-
-        for (key, val) in &header_pairs {
-            req = req.set(key, val);
-        }
+        let req = build_request(&agent, &method_str, &url_str, &header_pairs);
 
         let response = match &body_str {
             Some(body) => req.send_string(body),
@@ -321,58 +246,99 @@ fn stream_start(args: &mut [Janet]) -> Janet {
         }
     });
 
-    Janet::boolean(true)
+    Janet::number(stream_id as f64)
 }
 
-/// (http/stream-read)
-/// Non-blocking read of the next line from the background stream.
+/// (http/stream-read &opt stream-id)
+/// Non-blocking read of the next line from a background stream.
+///
+/// If stream-id is provided, reads from that specific stream.
+/// If omitted, reads from the most recently created stream (backward compat).
 ///
 /// Returns:
 ///   - string: the next SSE line
 ///   - :done keyword: stream finished normally
 ///   - {:type :error :message "..."} table: error occurred
 ///   - nil: no data available yet
-#[janetrs::janet_fn(arity(fix(0)))]
-fn stream_read(_args: &mut [Janet]) -> Janet {
-    let guard = STREAM_RX.lock().unwrap();
-    match guard.as_ref() {
-        None => Janet::from(JanetKeyword::new(b"done")), // no active stream
-        Some(rx) => {
-            match rx.try_recv() {
-                Ok(StreamEvent::Line(line)) => {
-                    Janet::from(JanetString::new(line.as_bytes()))
-                }
-                Ok(StreamEvent::Done) => {
-                    Janet::from(JanetKeyword::new(b"done"))
-                }
-                Ok(StreamEvent::Error(e)) => {
-                    let mut table = JanetTable::with_capacity(2);
-                    table.insert(
-                        JanetKeyword::new(b"type"),
-                        Janet::from(JanetKeyword::new(b"error")),
-                    );
-                    table.insert(
-                        JanetKeyword::new(b"message"),
-                        Janet::from(JanetString::new(e.as_bytes())),
-                    );
-                    Janet::from(table)
-                }
-                Err(mpsc::TryRecvError::Empty) => Janet::nil(),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    Janet::from(JanetKeyword::new(b"done"))
-                }
+#[janetrs::janet_fn(arity(range(0, 1)))]
+fn stream_read(args: &mut [Janet]) -> Janet {
+    init_streams();
+
+    // Determine which stream to read from
+    let stream_id: Option<u64> = if !args.is_empty() && !args[0].is_nil() {
+        let id: f64 = args[0].try_unwrap().expect("http/stream-read: stream-id must be a number");
+        Some(id as u64)
+    } else {
+        // Backward compat: read from the highest-ID stream
+        let guard = STREAMS.lock().unwrap();
+        guard.as_ref().and_then(|map| map.keys().max().copied())
+    };
+
+    let guard = STREAMS.lock().unwrap();
+    let map = match guard.as_ref() {
+        Some(m) => m,
+        None => return Janet::from(JanetKeyword::new(b"done")),
+    };
+
+    let sid = match stream_id {
+        Some(id) => id,
+        None => return Janet::from(JanetKeyword::new(b"done")),
+    };
+
+    match map.get(&sid) {
+        None => Janet::from(JanetKeyword::new(b"done")),
+        Some(rx) => match rx.try_recv() {
+            Ok(StreamEvent::Line(line)) => {
+                Janet::from(JanetString::new(line.as_bytes()))
             }
-        }
+            Ok(StreamEvent::Done) => {
+                Janet::from(JanetKeyword::new(b"done"))
+            }
+            Ok(StreamEvent::Error(e)) => {
+                let mut table = JanetTable::with_capacity(2);
+                table.insert(
+                    JanetKeyword::new(b"type"),
+                    Janet::from(JanetKeyword::new(b"error")),
+                );
+                table.insert(
+                    JanetKeyword::new(b"message"),
+                    Janet::from(JanetString::new(e.as_bytes())),
+                );
+                Janet::from(table)
+            }
+            Err(mpsc::TryRecvError::Empty) => Janet::nil(),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Janet::from(JanetKeyword::new(b"done"))
+            }
+        },
     }
 }
 
-/// (http/stream-stop)
-/// Cancel the background stream. Drops the receiver, causing the background
+/// (http/stream-stop &opt stream-id)
+/// Cancel a background stream. Drops the receiver, causing the background
 /// thread to exit on its next send attempt.
-#[janetrs::janet_fn(arity(fix(0)))]
-fn stream_stop(_args: &mut [Janet]) -> Janet {
-    let mut guard = STREAM_RX.lock().unwrap();
-    *guard = None;
+///
+/// If stream-id is provided, stops that specific stream.
+/// If omitted, stops all streams (backward compat).
+#[janetrs::janet_fn(arity(range(0, 1)))]
+fn stream_stop(args: &mut [Janet]) -> Janet {
+    init_streams();
+
+    if !args.is_empty() && !args[0].is_nil() {
+        let id: f64 = args[0].try_unwrap().expect("http/stream-stop: stream-id must be a number");
+        let sid = id as u64;
+        let mut guard = STREAMS.lock().unwrap();
+        if let Some(ref mut map) = *guard {
+            map.remove(&sid);
+        }
+    } else {
+        // Backward compat: stop all streams
+        let mut guard = STREAMS.lock().unwrap();
+        if let Some(ref mut map) = *guard {
+            map.clear();
+        }
+    }
+
     Janet::boolean(true)
 }
 
