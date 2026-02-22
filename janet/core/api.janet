@@ -265,8 +265,8 @@
   ``Start a non-blocking streaming request to Claude.
 
   Returns a table with:
-    :parser   — the SSE stream parser (feed lines with (:feed parser line))
-    :headers  — the request headers (for reference)
+    :parser     — the SSE stream parser (feed lines with (:feed parser line))
+    :stream-id  — the stream ID for http/stream-read and http/stream-stop
 
   Use http/stream-read to get lines, feed them to the parser.
   Call (:finish (:parser result)) when done to get the response.
@@ -276,10 +276,10 @@
   (def body (build-body-stream conversation tools system-prompt))
   (def parser (new-stream-parser callbacks))
 
-  # Start the background HTTP stream
-  (http/stream-start "POST" (config :url) headers body)
+  # Start the background HTTP stream — returns a stream-id
+  (def stream-id (http/stream-start "POST" (config :url) headers body))
 
-  @{:parser parser})
+  @{:parser parser :stream-id stream-id})
 
 (defn chat-stream
   ``Send a conversation to Claude with SSE streaming (blocking).
