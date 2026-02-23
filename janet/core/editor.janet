@@ -1,159 +1,290 @@
-# Input editor — a single-line editor fixed at the bottom of the terminal.
-# Handles keypresses, cursor movement, and basic line editing.
+# Input editor — a multiline editor at the bottom of the terminal.
+# Handles keypresses, cursor movement, line editing, and $EDITOR integration.
+# Backed by a core/buffers buffer (*input*) for point tracking and hookability.
 
 (import core/ui :as ui)
 (import core/conversation :as conv)
+(import core/buffers :as buffers)
+(import core/hooks :as hooks)
 
-(var- buf @"")
-(var- cursor 0)
+(var- input-buf (buffers/create "*input*"))
+(defn- get-content [] (input-buf :content))
+(defn- get-cursor [] (buffers/get-point input-buf))
+(defn- set-cursor [pos] (buffers/set-point input-buf pos))
+
 (var- prompt-text "you: ")
+(var- max-height 10)
+(var- scroll-top 0)
+(var- self-mutating false)
+(var- render-suppressed false)
 
 (defn set-prompt [p] (set prompt-text p))
 
+(defn- get-lines []
+  (string/split "\n" (string (get-content))))
+
+(defn- line-count []
+  (length (get-lines)))
+
+(defn get-height []
+  (min max-height (max 1 (line-count))))
+
+(defn- offset->rowcol []
+  (def content (get-content))
+  (def cursor (get-cursor))
+  (var row 0)
+  (var col 0)
+  (for i 0 cursor
+    (if (= (content i) (chr "\n"))
+      (do (++ row) (set col 0))
+      (++ col)))
+  [row col])
+
+(defn- rowcol->offset [row col]
+  (def lines (get-lines))
+  (def clamped-row (min row (- (length lines) 1)))
+  (var offset 0)
+  (for r 0 clamped-row
+    (+= offset (+ (length (get lines r)) 1)))
+  (def line-len (length (get lines clamped-row "")))
+  (def clamped-col (min col line-len))
+  (+ offset clamped-col))
+
+(defn- current-line-start []
+  (def content (get-content))
+  (var pos (get-cursor))
+  (while (and (> pos 0) (not= (content (- pos 1)) (chr "\n")))
+    (-- pos))
+  pos)
+
+(defn- current-line-end []
+  (def content (get-content))
+  (var pos (get-cursor))
+  (while (and (< pos (length content)) (not= (content pos) (chr "\n")))
+    (++ pos))
+  pos)
+
+(defn- ensure-cursor-visible []
+  (def [crow _] (offset->rowcol))
+  (def height (get-height))
+  (when (< crow scroll-top)
+    (set scroll-top crow))
+  (when (>= crow (+ scroll-top height))
+    (set scroll-top (- crow height -1))))
+
 (defn- render []
-  "Redraw the input line at the editor row."
+  "Redraw the editor area, supporting multiple lines."
+  (when render-suppressed (break))
   (def layout (ui/get-layout))
-  (term/write (ui/move-to (layout :input-row) 1))
-  (term/write (ui/clear-line))
-  (term/write (string (ui/color :user-label) " " prompt-text (ui/color :reset) " "))
-  (term/write (string buf))
-  # Position cursor correctly (prompt + space + cursor offset)
+  (def input-row (layout :input-row))
+  (def height (get-height))
+  (def base-row (- input-row (- height 1)))
+  (def [crow ccol] (offset->rowcol))
+  (ensure-cursor-visible)
+  (def lines (get-lines))
   (def prompt-len (+ (length prompt-text) 3))
-  (term/write (ui/move-to (layout :input-row) (+ prompt-len cursor))))
+  (def pad (string/repeat " " (- prompt-len 1)))
+  (for i 0 height
+    (def line-idx (+ scroll-top i))
+    (def row (+ base-row i))
+    (term/write (ui/move-to row 1))
+    (term/write (ui/clear-line))
+    (if (= i 0)
+      (term/write (string (ui/color :user-label) " " prompt-text (ui/color :reset) " "))
+      (term/write pad))
+    (when (< line-idx (length lines))
+      (term/write (get lines line-idx ""))))
+  (term/write (ui/move-to (+ base-row (- crow scroll-top)) (+ prompt-len ccol))))
 
 (defn- insert-char [ch]
-  (if (= cursor (length buf))
-    (buffer/push buf ch)
-    (do
-      (def after (buffer/slice buf cursor))
-      (buffer/popn buf (- (length buf) cursor))
-      (buffer/push buf ch)
-      (buffer/push buf after)))
-  (++ cursor)
+  (set self-mutating true)
+  (buffers/insert input-buf (get-cursor) ch)
+  (set self-mutating false)
   (render))
 
+(defn- insert-newline []
+  (insert-char "\n"))
+
 (defn- delete-back []
-  (when (> cursor 0)
-    (def before (buffer/slice buf 0 (- cursor 1)))
-    (def after (buffer/slice buf cursor))
-    (buffer/clear buf)
-    (buffer/push buf before)
-    (buffer/push buf after)
-    (-- cursor)
+  (def cur (get-cursor))
+  (when (> cur 0)
+    (set self-mutating true)
+    (buffers/delete input-buf (- cur 1) cur)
+    (set self-mutating false)
     (render)))
 
 (defn- delete-forward []
-  (when (< cursor (length buf))
-    (def before (buffer/slice buf 0 cursor))
-    (def after (buffer/slice buf (+ cursor 1)))
-    (buffer/clear buf)
-    (buffer/push buf before)
-    (buffer/push buf after)
+  (def cur (get-cursor))
+  (def content (get-content))
+  (when (< cur (length content))
+    (set self-mutating true)
+    (buffers/delete input-buf cur (+ cur 1))
+    (set self-mutating false)
     (render)))
 
 (defn- move-left []
-  (when (> cursor 0)
-    (-- cursor)
+  (def cur (get-cursor))
+  (when (> cur 0)
+    (set-cursor (- cur 1))
     (render)))
 
 (defn- move-right []
-  (when (< cursor (length buf))
-    (++ cursor)
+  (def cur (get-cursor))
+  (def content (get-content))
+  (when (< cur (length content))
+    (set-cursor (+ cur 1))
     (render)))
 
 (defn- move-home []
-  (set cursor 0)
+  (set-cursor (current-line-start))
   (render))
 
 (defn- move-end []
-  (set cursor (length buf))
+  (set-cursor (current-line-end))
   (render))
 
 (defn- kill-line []
-  "Delete from cursor to end of line (ctrl-k)."
-  (buffer/popn buf (- (length buf) cursor))
+  "Delete from cursor to end of current line (ctrl-k). If at newline, join lines."
+  (def cur (get-cursor))
+  (def content (get-content))
+  (def end (current-line-end))
+  (set self-mutating true)
+  (if (= cur end)
+    (when (< cur (length content))
+      (buffers/delete input-buf cur (+ cur 1)))
+    (buffers/delete input-buf cur end))
+  (set self-mutating false)
   (render))
 
 (defn- kill-word-back []
   "Delete word backwards (ctrl-w)."
-  (when (> cursor 0)
-    # Skip trailing spaces
-    (var pos (- cursor 1))
-    (while (and (> pos 0) (= (buf pos) (chr " ")))
+  (def cur (get-cursor))
+  (def content (get-content))
+  (when (> cur 0)
+    (var pos (- cur 1))
+    (while (and (> pos 0) (= (content pos) (chr " ")))
       (-- pos))
-    # Skip word characters
-    (while (and (> pos 0) (not= (buf pos) (chr " ")))
+    (while (and (> pos 0) (not= (content pos) (chr " ")))
       (-- pos))
-    (when (and (> pos 0) (= (buf pos) (chr " ")))
+    (when (and (> pos 0) (= (content pos) (chr " ")))
       (++ pos))
-    (def before (buffer/slice buf 0 pos))
-    (def after (buffer/slice buf cursor))
-    (buffer/clear buf)
-    (buffer/push buf before)
-    (buffer/push buf after)
-    (set cursor pos)
+    (set self-mutating true)
+    (buffers/delete input-buf pos cur)
+    (set self-mutating false)
     (render)))
 
 (defn- transpose-chars []
   "Transpose the two characters before cursor (ctrl-t)."
+  (def cur (get-cursor))
+  (def content (get-content))
   (cond
-    # At least 2 chars and cursor at end — swap last two
-    (and (>= (length buf) 2) (= cursor (length buf)))
+    (and (>= (length content) 2) (= cur (length content)))
     (do
-      (def tmp (buf (- cursor 1)))
-      (put buf (- cursor 1) (buf (- cursor 2)))
-      (put buf (- cursor 2) tmp)
+      (def a (string/from-bytes (content (- cur 2))))
+      (def b (string/from-bytes (content (- cur 1))))
+      (set self-mutating true)
+      (buffers/delete input-buf (- cur 2) cur)
+      (buffers/insert input-buf (- cur 2) (string b a))
+      (set self-mutating false)
       (render))
-    # In the middle — swap char under cursor with previous
-    (and (> cursor 0) (< cursor (length buf)))
+
+    (and (> cur 0) (< cur (length content)))
     (do
-      (def tmp (buf cursor))
-      (put buf cursor (buf (- cursor 1)))
-      (put buf (- cursor 1) tmp)
-      (++ cursor)
+      (def a (string/from-bytes (content (- cur 1))))
+      (def b (string/from-bytes (content cur)))
+      (set self-mutating true)
+      (buffers/delete input-buf (- cur 1) (+ cur 1))
+      (buffers/insert input-buf (- cur 1) (string b a))
+      (set self-mutating false)
       (render))))
 
 (defn- move-word-forward []
   "Move cursor forward one word (alt-f / ctrl-right)."
-  # Skip non-space characters first (current word)
-  (while (and (< cursor (length buf)) (not= (buf cursor) (chr " ")))
-    (++ cursor))
-  # Skip spaces
-  (while (and (< cursor (length buf)) (= (buf cursor) (chr " ")))
-    (++ cursor))
+  (def content (get-content))
+  (var pos (get-cursor))
+  (while (and (< pos (length content)) (not= (content pos) (chr " ")))
+    (++ pos))
+  (while (and (< pos (length content)) (= (content pos) (chr " ")))
+    (++ pos))
+  (set-cursor pos)
   (render))
 
 (defn- move-word-back []
   "Move cursor backward one word (alt-b / ctrl-left)."
-  # Skip spaces before cursor
-  (while (and (> cursor 0) (= (buf (- cursor 1)) (chr " ")))
-    (-- cursor))
-  # Skip word characters
-  (while (and (> cursor 0) (not= (buf (- cursor 1)) (chr " ")))
-    (-- cursor))
+  (def content (get-content))
+  (var pos (get-cursor))
+  (while (and (> pos 0) (= (content (- pos 1)) (chr " ")))
+    (-- pos))
+  (while (and (> pos 0) (not= (content (- pos 1)) (chr " ")))
+    (-- pos))
+  (set-cursor pos)
   (render))
 
 (defn- kill-word-forward []
   "Delete from cursor to end of next word (alt-d)."
-  (var end cursor)
-  # Skip spaces
-  (while (and (< end (length buf)) (= (buf end) (chr " ")))
+  (def content (get-content))
+  (def cur (get-cursor))
+  (var end cur)
+  (while (and (< end (length content)) (= (content end) (chr " ")))
     (++ end))
-  # Skip word characters
-  (while (and (< end (length buf)) (not= (buf end) (chr " ")))
+  (while (and (< end (length content)) (not= (content end) (chr " ")))
     (++ end))
-  (def before (buffer/slice buf 0 cursor))
-  (def after (buffer/slice buf end))
-  (buffer/clear buf)
-  (buffer/push buf before)
-  (buffer/push buf after)
+  (set self-mutating true)
+  (buffers/delete input-buf cur end)
+  (set self-mutating false)
   (render))
 
 (defn- clear-input []
   "Clear the entire input (ctrl-u)."
-  (buffer/clear buf)
-  (set cursor 0)
+  (def content (get-content))
+  (def len (length content))
+  (when (> len 0)
+    (set self-mutating true)
+    (buffers/delete input-buf 0 len)
+    (set self-mutating false))
   (render))
+
+(defn- open-external-editor []
+  (def editor-cmd (or (os/getenv "VISUAL") (os/getenv "EDITOR") "vi"))
+  (def tmpfile (string "/tmp/.gent-edit-" (math/floor (os/clock)) ".txt"))
+  (spit tmpfile (string (get-content)))
+  (term/write "\x1b[<u")
+  (term/write "\x1b[?1006l")
+  (term/write "\x1b[?1000l")
+  (term/write "\x1b[?25h")
+  (term/write "\x1b[?1049l")
+  (term/disable-raw-mode)
+  (try
+    (do
+      (def proc (os/spawn [editor-cmd tmpfile] :p))
+      (os/proc-wait proc))
+    ([err] (eprint "Editor failed: " err)))
+  (when (os/stat tmpfile)
+    (def new-content (string/trimr (slurp tmpfile)))
+    (def old-len (length (get-content)))
+    (set self-mutating true)
+    (when (> old-len 0)
+      (buffers/delete input-buf 0 old-len))
+    (when (> (length new-content) 0)
+      (buffers/insert input-buf 0 new-content))
+    (set self-mutating false)
+    (set-cursor (length (get-content)))
+    (os/rm tmpfile))
+  (term/enable-raw-mode)
+  (term/write "\x1b[?1049h")
+  (term/write "\x1b[?1000h")
+  (term/write "\x1b[?1006h")
+  (term/write "\x1b[>1u")
+  (term/write "\x1b[2J")
+  (term/write "\x1b[?25h")
+  (ui/restore (conv/get-messages))
+  (render))
+
+# Hook for external buffer mutations (e.g. autocomplete plugins)
+(hooks/add :buffer-modified
+  (fn [name _buf _kind]
+    (when (and (= name "*input*") (not self-mutating))
+      (render))))
 
 (defn handle-event
   "Process a single terminal event for the editor.
@@ -172,23 +303,30 @@
     (def alt (ev :alt))
 
     (cond
+      # Shift-Enter: insert newline
+      (and (ev :shift) (= key :enter))
+      (insert-newline)
+
+      # Ctrl-G: open $EDITOR
+      (and ctrl (= key "g"))
+      (open-external-editor)
+
       # Alt-Enter: submit as Janet eval
       (and alt (= key :enter))
       (do
-        (def result (string buf))
-        (buffer/clear buf)
-        (set cursor 0)
+        (def result (string (get-content)))
+        (clear-input)
+        (set scroll-top 0)
         (render)
         (break [:eval result]))
 
       # Submit — detect comma prefix for Janet eval
       (= key :enter)
       (do
-        (def result (string buf))
-        (buffer/clear buf)
-        (set cursor 0)
+        (def result (string (get-content)))
+        (clear-input)
+        (set scroll-top 0)
         (render)
-        # If input starts with "," treat as Janet eval (strip the comma)
         (if (and (> (length result) 1) (string/has-prefix? "," result))
           (break [:eval (string/slice result 1)])
           (break result)))
@@ -199,7 +337,7 @@
 
       # Ctrl-d: delete forward if buffer non-empty, quit if empty (readline behavior)
       (and ctrl (= key "d"))
-      (if (> (length buf) 0)
+      (if (> (length (get-content)) 0)
         (delete-forward)
         (break :quit))
 
@@ -236,9 +374,28 @@
       (and alt (= key "d")) (kill-word-forward)
       (and alt (= key :backspace)) (kill-word-back)
 
+      # Scroll — page up/down and arrow up/down scroll the chat
+      (= key :page-up)
+      (break :scroll-up)
+
+      (= key :page-down)
+      (break :scroll-down)
+
+      (= key :up)
+      (let [[row col] (offset->rowcol)]
+        (if (> row 0)
+          (do (set-cursor (rowcol->offset (- row 1) col)) (render))
+          (break :scroll-line-up)))
+
+      (= key :down)
+      (let [[row col] (offset->rowcol)]
+        (if (< row (- (line-count) 1))
+          (do (set-cursor (rowcol->offset (+ row 1) col)) (render))
+          (break :scroll-line-down)))
+
       # Escape — clear input or signal stop
       (= key :escape)
-      (if (> (length buf) 0)
+      (if (> (length (get-content)) 0)
         (do (clear-input))
         (break :stop))
 
@@ -246,7 +403,6 @@
       (and ctrl (= key "z"))
       (do
         (term/suspend)
-        # Restore TUI after resume — replay conversation history
         (ui/restore (conv/get-messages))
         (render))
 
@@ -268,9 +424,22 @@
 
 (defn reset []
   "Clear the editor buffer and re-render."
-  (buffer/clear buf)
-  (set cursor 0)
+  (clear-input)
+  (set scroll-top 0)
   (render))
+
+(defn batch-begin []
+  "Suppress rendering until batch-end. Use when processing many events at once."
+  (set render-suppressed true))
+
+(defn batch-end []
+  "End batch mode and render once."
+  (set render-suppressed false)
+  (render))
+
+(defn get-input-buf []
+  "Get the editor's *input* buffer for external manipulation."
+  input-buf)
 
 (defn read-input
   "Block until the user submits a line (Enter) or quits (Ctrl-C/Ctrl-D).
