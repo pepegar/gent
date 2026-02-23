@@ -30,7 +30,8 @@
 (defn dispatch
   "Try to dispatch a string as a slash command.
    Returns {:handled true :result string} if it was a command,
-   or {:handled false} if the input is not a slash command."
+   or {:handled false} if the input is not a slash command.
+   Supports colon syntax for compound commands (e.g. /skill:pdf → command 'skill' with args 'pdf')."
   [input]
   (unless (string/has-prefix? "/" input)
     (break {:handled false}))
@@ -43,7 +44,21 @@
   (when (= cmd-name "")
     (break {:handled false}))
 
-  (def cmd (get registry cmd-name))
+  # Try exact match first
+  (var cmd (get registry cmd-name))
+  (var effective-args args)
+
+  # If no exact match, try colon syntax: "skill:pdf" → command "skill", args "pdf"
+  (when (nil? cmd)
+    (def colon-idx (string/find ":" cmd-name))
+    (when colon-idx
+      (def base (string/slice cmd-name 0 colon-idx))
+      (def colon-arg (string/slice cmd-name (+ colon-idx 1)))
+      (def base-cmd (get registry base))
+      (when base-cmd
+        (set cmd base-cmd)
+        (set effective-args (if (= args "") colon-arg (string colon-arg " " args))))))
+
   (unless cmd
     (break {:handled true
             :result (string "Unknown command: /" cmd-name ". Type /help for available commands.")}))
@@ -51,7 +66,7 @@
   (def f (get cmd :function))
   (def result
     (try
-      (f args)
+      (f effective-args)
       ([err]
         (string "Command error: " err))))
   {:handled true :result (or result "")})
