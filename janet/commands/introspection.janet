@@ -3,6 +3,7 @@
 (import core/hooks :as hooks)
 (import core/skills :as skills)
 (import core/api :as api)
+(import core/conversation :as conv)
 
 (commands/register "tools"
   {:description "List registered tools"
@@ -45,6 +46,29 @@
          (each s (sort-by |($ :name) skill-list)
            (array/push lines (string "  " (s :name) " — " (s :description))))
          (string/join lines "\n"))))})
+
+(commands/register "skill"
+  {:description "Activate a skill (e.g. /skill:pdf)"
+   :usage "/skill:<name>"
+   :function (fn [args]
+     (def name (string/trim args))
+     (when (= name "")
+       (break "Usage: /skill:<name> — activate a skill by name.\nUse /skills to list available skills."))
+     (def result (skills/load-skill name))
+     (if result
+       (do
+         (conv/inject-context
+           (string "# Skill: " (result :name) "\n"
+                   "# Directory: " (result :path) "\n"
+                   "# (Resolve any file references relative to the directory above)\n"
+                   "\n"
+                   (result :body)))
+         (string "Activated skill: " (result :name)))
+       (let [available (skills/list-skills)]
+         (if (empty? available)
+           "No skills installed. Place skill directories in .gent/skills/ or ~/.gent/skills/"
+           (string "Skill not found: " name "\n"
+                   "Available: " (string/join (map |($ :name) available) ", "))))))})
 
 (commands/register "config"
   {:description "Show API configuration"
