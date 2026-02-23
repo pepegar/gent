@@ -8,16 +8,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Only embed if the embedded feature is enabled
     if env::var("CARGO_FEATURE_EMBEDDED").is_ok() {
+        // Generate just the file-writing statements wrapped in a block.
+        // Caching and directory creation are handled by main.rs.
+        // `temp_dir` is in scope from the calling function.
         let mut embedded_code = String::new();
         embedded_code.push_str("{\n");
-        embedded_code.push_str("    use std::fs;\n");
-        embedded_code.push_str("    let temp_dir = std::env::temp_dir().join(\"gent-janet\");\n");
-        embedded_code.push_str("    if temp_dir.exists() { return temp_dir; }\n");
-        embedded_code.push_str("    fs::create_dir_all(&temp_dir).expect(\"failed to create temp janet dir\");\n\n");
         
         embed_directory("janet", &mut embedded_code)?;
         
-        embedded_code.push_str("    temp_dir\n");
         embedded_code.push_str("}\n");
         
         fs::write(&dest_path, embedded_code)?;

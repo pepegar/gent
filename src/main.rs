@@ -36,15 +36,18 @@ fn find_janet_dir() -> PathBuf {
 fn extract_embedded_janet_code() -> PathBuf {
     use std::fs;
     
-    // Create a temporary directory for Janet code
     let temp_dir = std::env::temp_dir().join("gent-janet");
-    if temp_dir.exists() {
+    
+    // Check if already extracted (use boot.janet as marker)
+    if temp_dir.join("boot.janet").exists() {
         return temp_dir;
     }
     
+    // Remove stale/incomplete extraction
+    let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("failed to create temp janet dir");
     
-    // Include all Janet files at compile time
+    // Write all embedded Janet files
     include!(concat!(env!("OUT_DIR"), "/embedded_janet.rs"));
     
     temp_dir
