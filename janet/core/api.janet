@@ -79,19 +79,45 @@
                   "  • ANTHROPIC_API_KEY    — set environment variable\n"
                   "  • (api/set-api-key k)  — set in init.janet")))
 
+(defn- oauth-token? []
+  "Check if the current credential is an OAuth token."
+  (def cred (auth/get-credential "anthropic"))
+  (and cred (= "oauth" (get cred "type"))))
+
 (defn- build-headers []
   (def api-key (resolve-api-key))
-  @{"content-type" "application/json"
-    "x-api-key" api-key
-    "anthropic-version" "2023-06-01"})
+  (def is-oauth (oauth-token?))
+  (def headers
+    @{"content-type" "application/json"
+      "anthropic-version" "2023-06-01"})
+  (if is-oauth
+    (do
+      (put headers "authorization" (string "Bearer " api-key))
+      (put headers "anthropic-beta" "claude-code-20250219,oauth-2025-04-20")
+      (put headers "anthropic-dangerous-direct-browser-access" "true")
+      (put headers "user-agent" "claude-cli/2.1.2 (external, cli)")
+      (put headers "x-app" "cli"))
+    (put headers "x-api-key" api-key))
+  headers)
+
+(def- claude-code-identity "You are Claude Code, Anthropic's official CLI for Claude.")
+
+(defn- wrap-system-prompt [system-prompt]
+  "For OAuth tokens, prepend Claude Code identity to the system prompt."
+  (if (oauth-token?)
+    (if system-prompt
+      (string claude-code-identity "\n\n" system-prompt)
+      claude-code-identity)
+    system-prompt))
 
 (defn- build-body [conversation tools &opt system-prompt]
   (def body @{:model (config :model)
               :max_tokens (config :max-tokens)
               :messages conversation
               :tools tools})
-  (when system-prompt
-    (put body :system system-prompt))
+  (def effective-prompt (wrap-system-prompt system-prompt))
+  (when effective-prompt
+    (put body :system effective-prompt))
   (json/encode body))
 
 (defn chat
@@ -114,8 +140,9 @@
               :messages conversation
               :tools tools
               :stream true})
-  (when system-prompt
-    (put body :system system-prompt))
+  (def effective-prompt (wrap-system-prompt system-prompt))
+  (when effective-prompt
+    (put body :system effective-prompt))
   (json/encode body))
 
 # ── SSE stream parser ──────────────────────────────────────────
