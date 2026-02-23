@@ -39,9 +39,13 @@ install packages, compile code, run tests, etc. The command runs in the current 
                          " ; echo $? > " (paths :done)))
 
                (var proc nil)
+               # Open /dev/null for the child's stdin so it can't steal
+               # terminal input from the TUI event loop.
+               (def devnull (os/open "/dev/null" :r))
                (try
-                 (set proc (os/spawn ["bash" "-c" wrapper] :p))
+                 (set proc (os/spawn ["bash" "-c" wrapper] :p {:in devnull}))
                  ([err]
+                   (when devnull (:close devnull))
                    (cleanup-temp paths)
                    (break (string "Error: failed to start process: " err))))
 
@@ -54,6 +58,7 @@ install packages, compile code, run tests, etc. The command runs in the current 
                      (def status (or (scan-number status-str) -1))
                      (def stdout (if (os/stat (paths :stdout)) (slurp (paths :stdout)) ""))
                      (def stderr (if (os/stat (paths :stderr)) (slurp (paths :stderr)) ""))
+                     (when devnull (try (:close devnull) ([_] nil)))
                      (cleanup-temp paths)
                      [:done (string/format "exit code: %d\nstdout:\n%s\nstderr:\n%s"
                                            (math/round status)
@@ -64,4 +69,5 @@ install packages, compile code, run tests, etc. The command runs in the current 
                  (fn []
                    (when proc
                      (try (os/proc-kill proc) ([_] nil)))
+                   (when devnull (try (:close devnull) ([_] nil)))
                    (cleanup-temp paths))))})
