@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 /// Find the `janet/` directory containing our scripts.
 /// Looks relative to CWD first, then relative to the executable.
+/// If neither exists, creates a temporary directory with embedded Janet code.
 fn find_janet_dir() -> PathBuf {
     // Relative to CWD
     let cwd = std::env::current_dir().expect("failed to get cwd");
@@ -19,7 +20,34 @@ fn find_janet_dir() -> PathBuf {
     if candidate.exists() {
         return candidate;
     }
-    panic!("could not find janet/ directory (looked in {:?} and {:?})", cwd, exe_dir);
+    
+    // If we're in a packaged environment, extract embedded Janet code
+    #[cfg(feature = "embedded")]
+    {
+        extract_embedded_janet_code()
+    }
+    #[cfg(not(feature = "embedded"))]
+    {
+        panic!("could not find janet/ directory (looked in {:?} and {:?})", cwd, exe_dir);
+    }
+}
+
+#[cfg(feature = "embedded")]
+fn extract_embedded_janet_code() -> PathBuf {
+    use std::fs;
+    
+    // Create a temporary directory for Janet code
+    let temp_dir = std::env::temp_dir().join("gent-janet");
+    if temp_dir.exists() {
+        return temp_dir;
+    }
+    
+    fs::create_dir_all(&temp_dir).expect("failed to create temp janet dir");
+    
+    // Include all Janet files at compile time
+    include!(concat!(env!("OUT_DIR"), "/embedded_janet.rs"));
+    
+    temp_dir
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

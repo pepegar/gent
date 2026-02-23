@@ -627,10 +627,23 @@
       (when (abort/aborted?)
         (spinner-stop)
         (output-info "— remaining tools skipped —")
-        (push-tool-results-and-stream)
-        (when (= mode :idle) (break))
-        (when (not (empty? steering-queue))
-          (process-steering-or-idle))
+        
+        # Check if we have incomplete tool calls that would cause API errors
+        (def tool-calls (tool-exec :tool-calls))
+        (def completed-tools (tool-exec :results))
+        (def has-incomplete (and (not (empty? tool-calls)) 
+                                (< (length completed-tools) (length tool-calls))))
+        
+        (if has-incomplete
+          # Don't push incomplete assistant message - just handle steering
+          (when (not (empty? steering-queue))
+            (process-steering-or-idle))
+          # All tools completed - safe to push results and stream
+          (do
+            (push-tool-results-and-stream)
+            (when (= mode :idle) (break))
+            (when (not (empty? steering-queue))
+              (process-steering-or-idle))))
         (break))
 
       (if (>= idx (length (tool-exec :tool-calls)))
@@ -685,6 +698,27 @@
             (hooks/run :on-error err)
             (output-error (string err))))))))
 
+# ── Tool cancellation fix ─────────────────────────────────────
+
+(defn- handle-cancelled-tool-calls
+  "When tool calls are cancelled, we need to either remove the incomplete
+   assistant message or add synthetic tool_result blocks to prevent API errors.
+   
+   This function checks if the last message contains tool_use blocks without 
+   corresponding tool_result blocks and fixes the conversation history."
+  []
+  (def messages (conv/get-messages))
+  (def last-msg (if (> (length messages) 0) (last messages) nil))
+  
+  # Check if last message is an assistant message with tool_use content
+  (when (and last-msg (= (get last-msg :role) "assistant"))
+    (def content (get last-msg :content []))
+    (def tool-uses (filter |(= "tool_use" ($ :type)) content))
+    
+    (when (not (empty? tool-uses))
+      # We have tool_use blocks without results - rollback the incomplete message
+      (conv/rollback 1))))
+
 # ── Public API ─────────────────────────────────────────────────
 
 (defn active? []
@@ -737,7 +771,6 @@
         (put tool-exec :async-handle nil))
       (spinner-stop)
       (output-info "— tools cancelled —")
-      (conv/push {:role "assistant" :content (tool-exec :content)})
       (array/clear steering-queue)
       (array/clear followup-queue)
       (enter-idle)
