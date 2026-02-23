@@ -60,7 +60,7 @@
   (def home (os/getenv "HOME"))
   (string home "/.gent/sessions"))
 
-(defn- project-sessions-dir
+(defn project-sessions-dir
   "Return the sessions directory for the current working directory."
   []
   (string (sessions-base-dir) "/" (url-encode (os/cwd))))
@@ -82,7 +82,7 @@
   (when history-path
     (spit history-path (string (string/format "%j" msg) "\n") :a)))
 
-(defn- load-history
+(defn load-history
   "Load messages from a history file using Janet's parser."
   [path]
   (def result @[])
