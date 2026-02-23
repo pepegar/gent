@@ -35,9 +35,9 @@
       # Runtime dependencies
       buildInputs = with pkgs;
         lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.Security
-          darwin.apple_sdk.frameworks.CoreFoundation
-          darwin.apple_sdk.frameworks.SystemConfiguration
+          # Modern Darwin framework paths
+          apple-sdk
+          libiconv
         ];
 
       # Common package attributes
