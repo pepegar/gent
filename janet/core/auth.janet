@@ -370,16 +370,16 @@
 
   (def token-data (json/decode response))
 
-  (when (or (nil? token-data) (nil? (get token-data "access_token")))
+  (when (or (nil? token-data) (nil? (get token-data :access_token)))
     (error (string "Token exchange failed: " (or response "unknown error"))))
 
-  (def expires-in (get token-data "expires_in" 3600))
+  (def expires-in (get token-data :expires_in 3600))
   # Expiry: current time + expires_in seconds - 5 min buffer (in milliseconds for compat with pi-mono)
   (def expires-at (+ (* (os/time) 1000) (* expires-in 1000) (* -5 60 1000)))
 
   @{"type" "oauth"
-    "refresh" (get token-data "refresh_token")
-    "access" (get token-data "access_token")
+    "refresh" (get token-data :refresh_token)
+    "access" (get token-data :access_token)
     "expires" expires-at})
 
 (defn- anthropic-login [callbacks]
@@ -423,15 +423,15 @@
     (error "Anthropic token refresh failed — no response"))
 
   (def data (json/decode response))
-  (when (or (nil? data) (nil? (get data "access_token")))
+  (when (or (nil? data) (nil? (get data :access_token)))
     (error (string "Anthropic token refresh failed: " (or response "unknown error"))))
 
-  (def expires-in (get data "expires_in" 3600))
+  (def expires-in (get data :expires_in 3600))
   (def expires-at (+ (* (os/time) 1000) (* expires-in 1000) (* -5 60 1000)))
 
   @{"type" "oauth"
-    "refresh" (or (get data "refresh_token") refresh-token)
-    "access" (get data "access_token")
+    "refresh" (or (get data :refresh_token) refresh-token)
+    "access" (get data :access_token)
     "expires" expires-at})
 
 (defn- anthropic-get-api-key [credentials]
