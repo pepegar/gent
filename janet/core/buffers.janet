@@ -21,6 +21,7 @@
     :content (if (buffer? content) content (buffer content))
     :path path
     :dirty false
+    :point 0
     :meta @{}})
 
 (defn- touch [buf]
@@ -105,6 +106,24 @@
   (when (and (>= n 0) (< n (length ls)))
     (get ls n)))
 
+# ── Point ─────────────────────────────────────────────────────
+
+(defn get-point
+  "Get the buffer's point (cursor position)."
+  [buf]
+  (buf :point))
+
+(defn set-point
+  "Set the buffer's point, clamped to [0, length]."
+  [buf pos]
+  (def len (length (buf :content)))
+  (put buf :point (max 0 (min pos len))))
+
+(defn point-at-end?
+  "True if point is at the end of the buffer content."
+  [buf]
+  (= (buf :point) (length (buf :content))))
+
 # ── Mutate ─────────────────────────────────────────────────────
 
 (defn insert
@@ -113,10 +132,14 @@
   (def c (buf :content))
   (when (or (< pos 0) (> pos (length c)))
     (error (string "insert position out of range: " pos)))
+  (def n (length text))
+  (def pt (buf :point))
   (def after (buffer/slice c pos))
   (buffer/popn c (- (length c) pos))
   (buffer/push c text)
   (buffer/push c after)
+  (when (<= pos pt)
+    (put buf :point (+ pt n)))
   (touch buf)
   (hooks/run :buffer-modified (buf :name) buf :insert)
   buf)
@@ -127,11 +150,15 @@
   (def c (buf :content))
   (when (or (< start 0) (> end (length c)) (> start end))
     (error (string "delete range out of bounds: " start "-" end)))
+  (def pt (buf :point))
   (def before (buffer/slice c 0 start))
   (def after (buffer/slice c end))
   (buffer/clear c)
   (buffer/push c before)
   (buffer/push c after)
+  (cond
+    (<= end pt)   (put buf :point (- pt (- end start)))
+    (<= start pt) (put buf :point start))
   (touch buf)
   (hooks/run :buffer-modified (buf :name) buf :delete)
   buf)
@@ -144,9 +171,16 @@
   (def idx (string/find old s))
   (unless idx
     (error "old string not found in buffer"))
+  (def old-len (length old))
+  (def new-len (length new))
+  (def pt (buf :point))
+  (def match-end (+ idx old-len))
   (def result (string/replace old new s))
   (buffer/clear c)
   (buffer/push c result)
+  (cond
+    (<= match-end pt) (put buf :point (+ pt (- new-len old-len)))
+    (<= idx pt)       (put buf :point (+ idx new-len)))
   (touch buf)
   (hooks/run :buffer-modified (buf :name) buf :replace)
   buf)
@@ -159,8 +193,34 @@
   (def result (string/replace-all old new s))
   (when (= s result)
     (error "old string not found in buffer"))
+  (def old-len (length old))
+  (def new-len (length new))
+  (def pt (buf :point))
+  (def matches (string/find-all old s))
+  (var delta 0)
+  (var new-point pt)
+  (var resolved false)
+  (each idx matches
+    (def match-end (+ idx old-len))
+    (cond
+      (<= match-end pt)
+      (+= delta (- new-len old-len))
+
+      (<= idx pt)
+      (do
+        (set new-point (+ idx delta new-len))
+        (set resolved true)
+        (break))
+
+      (do
+        (set new-point (+ pt delta))
+        (set resolved true)
+        (break))))
+  (unless resolved
+    (set new-point (+ pt delta)))
   (buffer/clear c)
   (buffer/push c result)
+  (put buf :point new-point)
   (touch buf)
   (hooks/run :buffer-modified (buf :name) buf :replace)
   buf)
@@ -196,4 +256,7 @@
   (buffer/clear (buf :content))
   (buffer/push (buf :content) content)
   (put buf :dirty false)
+  (def len (length (buf :content)))
+  (when (> (buf :point) len)
+    (put buf :point len))
   buf)
