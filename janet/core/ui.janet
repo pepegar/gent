@@ -292,12 +292,21 @@
 (def- spinner-frames ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"])
 (var- spinner-state @{:active false :frame 0 :message ""})
 
+(defn- clear-editor-rows []
+  (def ed-height (or (layout :editor-height) 1))
+  (def input-row (layout :input-row))
+  (def base-row (- input-row (- ed-height 1)))
+  (for i 0 ed-height
+    (term/write (move-to (+ base-row i) 1))
+    (term/write (clear-line))))
+
 (defn spinner-start [msg]
   "Start the spinner with a message (e.g. \"thinking…\")."
   (put spinner-state :active true)
   (put spinner-state :frame 0)
   (put spinner-state :message msg)
   (def frame (get spinner-frames 0))
+  (clear-editor-rows)
   (term/write (move-to (layout :input-row) 1))
   (term/write (clear-line))
   (term/write (string (color :separator) " " frame " " msg (color :reset))))
@@ -311,16 +320,16 @@
   (when (spinner-state :active)
     (put spinner-state :frame (% (+ (spinner-state :frame) 1) (length spinner-frames)))
     (def frame (get spinner-frames (spinner-state :frame)))
+    (clear-editor-rows)
     (term/write (move-to (layout :input-row) 1))
     (term/write (clear-line))
     (term/write (string (color :separator) " " frame " " (spinner-state :message) (color :reset)))))
 
 (defn spinner-stop []
-  "Stop the spinner and clear the input row."
+  "Stop the spinner and clear the editor area."
   (when (spinner-state :active)
     (put spinner-state :active false)
-    (term/write (move-to (layout :input-row) 1))
-    (term/write (clear-line))))
+    (clear-editor-rows)))
 
 (defn output-tool [name &opt detail]
   (def msg (if detail
@@ -562,6 +571,9 @@
    Re-enables raw mode (already done by term/suspend), redraws the screen,
    and replays conversation history if messages are provided."
   (refresh-layout)
+  (term/write "\x1b[?1049h")   # re-enter alternate screen
+  (term/write "\x1b[?1000h")   # re-enable mouse tracking
+  (term/write "\x1b[?1006h")   # re-enable SGR mouse mode
   (term/write (clear-screen))
   (term/write (move-to 1 1))
   (term/write (set-scroll-region 1 (layout :output-bottom)))
