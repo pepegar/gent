@@ -82,6 +82,19 @@
   (when (and gent-home (not (os/stat gent-home)))
     (os/mkdir gent-home)))
 
+(defn- stringify-keys
+  "Recursively convert keyword keys to string keys in a table/struct."
+  [val]
+  (cond
+    (or (table? val) (struct? val))
+    (do
+      (def result @{})
+      (eachp [k v] val
+        (def str-key (if (keyword? k) (string k) k))
+        (put result str-key (stringify-keys v)))
+      result)
+    val))
+
 (defn- read-auth-file []
   "Read and parse auth.json. Returns a table or empty table on error."
   (if (and auth-path (os/stat auth-path))
@@ -89,9 +102,11 @@
       (do
         (def content (slurp auth-path))
         (def parsed (json/decode content))
-        (if (table? parsed) parsed
-            (if (struct? parsed) (table ;(kvs parsed))
-                @{})))
+        (def tbl (if (table? parsed) parsed
+                     (if (struct? parsed) (table ;(kvs parsed))
+                         @{})))
+        # json/decode uses keyword keys, but auth code expects string keys
+        (stringify-keys tbl))
       ([err]
         (eprintf "Warning: failed to read auth.json: %s" (string err))
         @{}))
