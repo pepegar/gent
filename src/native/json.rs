@@ -1,6 +1,6 @@
 use janetrs::{
-    client::JanetClient, env::CFunOptions, Janet, JanetArray, JanetKeyword, JanetString,
-    JanetTable,
+    client::JanetClient, env::CFunOptions, Janet, JanetArray, JanetBuffer, JanetKeyword,
+    JanetString, JanetTable,
 };
 
 /// Convert a Janet value to a serde_json::Value.
@@ -110,16 +110,22 @@ fn encode(args: &mut [Janet]) -> Janet {
 }
 
 /// (json/decode str)
-/// Decode a JSON string into a Janet value.
+/// Decode a JSON string (or buffer) into a Janet value.
 #[janetrs::janet_fn(arity(fix(1)))]
 fn decode(args: &mut [Janet]) -> Janet {
-    let s: JanetString = args[0]
-        .try_unwrap()
-        .expect("json/decode expects a string");
-    let bytes = s.as_bytes();
-    let str_val = std::str::from_utf8(bytes).expect("json/decode: input is not valid UTF-8");
+    let str_val: String = if let Ok(s) = args[0].try_unwrap::<JanetString>() {
+        std::str::from_utf8(s.as_bytes())
+            .expect("json/decode: input is not valid UTF-8")
+            .to_owned()
+    } else if let Ok(b) = args[0].try_unwrap::<JanetBuffer>() {
+        std::str::from_utf8(b.as_bytes())
+            .expect("json/decode: input is not valid UTF-8")
+            .to_owned()
+    } else {
+        panic!("json/decode expects a string or buffer");
+    };
 
-    match serde_json::from_str::<serde_json::Value>(str_val) {
+    match serde_json::from_str::<serde_json::Value>(&str_val) {
         Ok(val) => json_to_janet(&val),
         Err(e) => {
             eprintln!("json/decode error: {}", e);
