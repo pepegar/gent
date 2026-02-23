@@ -209,7 +209,54 @@
     :undo @[]
     :redo @[]
     :kill-ring @[]
-    :last-yank nil})
+    :last-yank nil
+    :styled-spans @[]})
+
+# ── Styled Spans ───────────────────────────────────────────
+
+(defn add-styled-span
+  "Mark a byte range [start, end) with a display style."
+  [state start end style]
+  (array/push (state :styled-spans) @{:start start :end end :style style}))
+
+(defn clear-styled-spans
+  "Remove all styled spans."
+  [state]
+  (array/clear (state :styled-spans)))
+
+(defn- invalidate-spans
+  "Adjust or remove spans affected by an edit.
+   edit-start/edit-end: byte range that was modified.
+   delta: number of bytes added (positive) or removed (negative)."
+  [state edit-start edit-end delta]
+  (def spans (state :styled-spans))
+  (var i 0)
+  (while (< i (length spans))
+    (def span (get spans i))
+    (def s (span :start))
+    (def e (span :end))
+    (cond
+      # Span is entirely before the edit — no change
+      (<= e edit-start)
+      (++ i)
+
+      # Span is entirely after the edit — shift by delta
+      (>= s edit-end)
+      (do
+        (put span :start (+ s delta))
+        (put span :end (+ e delta))
+        (++ i))
+
+      # Edit is entirely within the span — adjust end
+      (and (<= s edit-start) (>= e edit-end))
+      (do
+        (put span :end (+ e delta))
+        (if (<= (span :end) (span :start))
+          (array/remove spans i)
+          (++ i)))
+
+      # Edit overlaps span — remove it
+      (array/remove spans i))))
 
 (defn text
   "Get the full text as a string."
@@ -305,7 +352,9 @@
   [state ch]
   (snapshot state)
   (def buf (state :buf))
-  (buffers/insert buf (buffers/get-point buf) ch)
+  (def pt (buffers/get-point buf))
+  (buffers/insert buf pt ch)
+  (invalidate-spans state pt pt (length ch))
   (put state :sticky-col nil)
   (put state :last-yank nil)
   (ensure-cursor-visible state))
@@ -315,7 +364,9 @@
   [state]
   (snapshot state)
   (def buf (state :buf))
-  (buffers/insert buf (buffers/get-point buf) "\n")
+  (def pt (buffers/get-point buf))
+  (buffers/insert buf pt "\n")
+  (invalidate-spans state pt pt 1)
   (put state :sticky-col nil)
   (put state :last-yank nil)
   (ensure-cursor-visible state))
@@ -328,6 +379,7 @@
   (when (> pt 0)
     (snapshot state)
     (buffers/delete buf (- pt 1) pt)
+    (invalidate-spans state (- pt 1) pt -1)
     (put state :sticky-col nil)
     (put state :last-yank nil)
     (ensure-cursor-visible state))
@@ -342,6 +394,7 @@
   (when (< pt (length content))
     (snapshot state)
     (buffers/delete buf pt (+ pt 1))
+    (invalidate-spans state pt (+ pt 1) -1)
     (put state :sticky-col nil)
     (put state :last-yank nil)
     (ensure-cursor-visible state))
@@ -479,6 +532,7 @@
       (when (> (length (state :kill-ring)) 30)
         (array/remove (state :kill-ring) 0))
       (buffers/delete buf word-start pt)
+      (invalidate-spans state word-start pt (- (- pt word-start)))
       (put state :sticky-col nil)
       (put state :last-yank nil)
       (ensure-cursor-visible state)))
@@ -499,6 +553,7 @@
       (when (> (length (state :kill-ring)) 30)
         (array/remove (state :kill-ring) 0))
       (buffers/delete buf pt word-end)
+      (invalidate-spans state pt word-end (- (- word-end pt)))
       (put state :sticky-col nil)
       (put state :last-yank nil)
       (ensure-cursor-visible state)))
@@ -521,13 +576,15 @@
       (array/push (state :kill-ring) killed)
       (when (> (length (state :kill-ring)) 30)
         (array/remove (state :kill-ring) 0))
-      (buffers/delete buf pt (+ pt 1)))
+      (buffers/delete buf pt (+ pt 1))
+      (invalidate-spans state pt (+ pt 1) -1))
     (do
       (def killed (string/slice content pt end))
       (array/push (state :kill-ring) killed)
       (when (> (length (state :kill-ring)) 30)
         (array/remove (state :kill-ring) 0))
-      (buffers/delete buf pt end)))
+      (buffers/delete buf pt end)
+      (invalidate-spans state pt end (- (- end pt)))))
   (put state :sticky-col nil)
   (put state :last-yank nil)
   (ensure-cursor-visible state))
@@ -547,6 +604,7 @@
     (when (> (length (state :kill-ring)) 30)
       (array/remove (state :kill-ring) 0))
     (buffers/delete buf start pt)
+    (invalidate-spans state start pt (- (- pt start)))
     (put state :sticky-col nil)
     (put state :last-yank nil)
     (ensure-cursor-visible state))
@@ -561,7 +619,9 @@
   (snapshot state)
   (def entry (last kr))
   (def buf (state :buf))
-  (buffers/insert buf (buffers/get-point buf) entry)
+  (def pt (buffers/get-point buf))
+  (buffers/insert buf pt entry)
+  (invalidate-spans state pt pt (length entry))
   (put state :last-yank (length entry))
   (put state :sticky-col nil)
   (ensure-cursor-visible state))
@@ -651,8 +711,33 @@
 
 # ── Rendering ────────────────────────────────────────────────
 
+(defn- compute-visible-spans
+  "Map styled-spans to viewport coordinates for the visible region."
+  [state scroll height vlines]
+  (def spans (state :styled-spans))
+  (when (empty? spans) (break @[]))
+
+  (def result @[])
+  (for row-idx 0 (min height (- (length vlines) scroll))
+    (def vl (get vlines (+ scroll row-idx)))
+    (def vl-start (vl :start))
+    (def vl-end (vl :end))
+    (each span spans
+      (def s (span :start))
+      (def e (span :end))
+      (when (and (< s vl-end) (> e vl-start))
+        (def col-start (max 0 (- s vl-start)))
+        (def col-end (min (- vl-end vl-start) (- e vl-start)))
+        (when (> col-end col-start)
+          (array/push result
+            {:row row-idx
+             :col-start col-start
+             :col-end col-end
+             :style (span :style)})))))
+  result)
+
 (defn render
-  "Render the editor viewport. Returns {:lines [...] :cursor {:row :col}}."
+  "Render the editor viewport. Returns {:lines [...] :cursor {:row :col} :spans [...]}."
   [state]
   (def buf (state :buf))
   (def content (buffers/string-content buf))
@@ -665,14 +750,15 @@
   (for i scroll (min (+ scroll height) (length vlines))
     (array/push visible (get-in vlines [i :text])))
 
-  # Pad with empty strings if fewer visual lines than viewport
   (while (< (length visible) height)
     (array/push visible ""))
 
   (def vis (point->visual state))
+  (def vis-spans (compute-visible-spans state scroll height vlines))
   {:lines visible
    :cursor {:row (- (vis :row) scroll)
-            :col (vis :col)}})
+            :col (vis :col)}
+   :spans vis-spans})
 
 # ── Bulk Operations ──────────────────────────────────────────
 
@@ -681,7 +767,9 @@
   [state txt]
   (snapshot state)
   (def buf (state :buf))
-  (buffers/insert buf (buffers/get-point buf) txt)
+  (def pt (buffers/get-point buf))
+  (buffers/insert buf pt txt)
+  (invalidate-spans state pt pt (length txt))
   (put state :sticky-col nil)
   (put state :last-yank nil)
   (ensure-cursor-visible state))
@@ -695,6 +783,7 @@
   (def len (length c))
   (when (> len 0)
     (buffers/delete buf 0 len))
+  (array/clear (state :styled-spans))
   (when (> (length txt) 0)
     (buffers/insert buf 0 txt))
   (put state :sticky-col nil)
