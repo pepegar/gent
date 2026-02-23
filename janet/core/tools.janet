@@ -13,6 +13,14 @@
   (put registry name definition)
   (string "Tool registered: " name))
 
+(defn unregister
+  "Remove a tool from the registry. Returns status string."
+  [name]
+  (if (get registry name)
+    (do (put registry name nil)
+        (string "Tool unregistered: " name))
+    (string "Tool not found: " name)))
+
 (defn definitions
   "Return tool definitions formatted for the Anthropic API."
   []
@@ -33,22 +41,24 @@
   (if-let [tool (get registry name)]
     (do
       (hooks/run :before-tool-call name input)
-      (try
-        (let [result ((tool :function) input)]
+      (def [ok result] (protect ((tool :function) input)))
+      (if (not ok)
+        (do
+          (def errmsg (string "Error executing " name ": " result))
+          (hooks/run :on-error result)
+          errmsg)
+        (do
           (def coerced
             (cond
-              # Structured content (image blocks, etc.) — pass through as-is
               (table? result)  result
               (tuple? result)  result
               (array? result)  result
-              # Everything else — coerce to string
               (string result)))
-          (hooks/run :after-tool-call name input coerced)
-          coerced)
-        ([err]
-          (def errmsg (string "Error executing " name ": " err))
-          (hooks/run :on-error err)
-          errmsg)))
+          (try
+            (hooks/run :after-tool-call name input coerced)
+            ([err]
+              (eprintf "after-tool-call hook error for %s: %s" name (string err))))
+          coerced)))
     (string "Unknown tool: " name)))
 
 (defn get-tool

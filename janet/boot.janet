@@ -8,6 +8,7 @@
 (import core/api :as api)
 (import core/ui :as ui)
 (import core/editor :as editor)
+(import core/widget :as widget)
 (import core/agent :as agent)
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
@@ -27,6 +28,7 @@
 # Built-in slash commands
 (import commands/conversation)
 (import commands/auth)
+(import commands/introspection)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)
