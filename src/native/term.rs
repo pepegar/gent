@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind},
     terminal,
 };
 use janetrs::{
@@ -100,7 +100,8 @@ fn read_event(args: &mut [Janet]) -> Janet {
     // Optional timeout
     let has_timeout = !args.is_empty() && !args[0].is_nil();
 
-    // Loop until we get a Key or Resize event, skipping FocusGained/Lost, Mouse, Paste, etc.
+    // Loop until we get a Key, Resize, or Mouse scroll event.
+    // Skips FocusGained/Lost, paste, and non-scroll mouse events.
     loop {
         if has_timeout {
             let timeout_ms: f64 = args[0].try_unwrap().expect("timeout must be a number");
@@ -114,6 +115,35 @@ fn read_event(args: &mut [Janet]) -> Janet {
 
         match event::read() {
             Ok(Event::Key(key_event)) => return key_event_to_janet(key_event),
+            Ok(Event::Mouse(mouse_event)) => {
+                match mouse_event.kind {
+                    MouseEventKind::ScrollUp => {
+                        let mut table = JanetTable::with_capacity(2);
+                        table.insert(
+                            JanetKeyword::new(b"type"),
+                            Janet::from(JanetKeyword::new(b"scroll")),
+                        );
+                        table.insert(
+                            JanetKeyword::new(b"direction"),
+                            Janet::from(JanetKeyword::new(b"up")),
+                        );
+                        return Janet::from(table);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        let mut table = JanetTable::with_capacity(2);
+                        table.insert(
+                            JanetKeyword::new(b"type"),
+                            Janet::from(JanetKeyword::new(b"scroll")),
+                        );
+                        table.insert(
+                            JanetKeyword::new(b"direction"),
+                            Janet::from(JanetKeyword::new(b"down")),
+                        );
+                        return Janet::from(table);
+                    }
+                    _ => continue, // Skip non-scroll mouse events
+                }
+            }
             Ok(Event::Resize(cols, rows)) => {
                 let mut table = JanetTable::with_capacity(3);
                 table.insert(
@@ -124,7 +154,7 @@ fn read_event(args: &mut [Janet]) -> Janet {
                 table.insert(JanetKeyword::new(b"rows"), Janet::number(rows as f64));
                 return Janet::from(table);
             }
-            Ok(_) => continue, // Skip focus, mouse, paste events
+            Ok(_) => continue, // Skip focus, paste events
             Err(_) => return Janet::nil(),
         }
     }
