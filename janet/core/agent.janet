@@ -19,7 +19,7 @@
 (import core/registers :as reg)
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
-(import core/editor :as editor)
+(import widgets/editor :as editor)
 (import tui)
 (import widgets/chat :as chat)
 (import widgets/editor :as editor-w)
@@ -30,7 +30,8 @@
 (defn- default-layout
   "Default layout: chat on top, separator, editor at bottom."
   [area]
-  (def [chat-area sep-area editor-area] (tui/vsplit area :fill 1 1))
+  (def ed-height (editor/get-height))
+  (def [chat-area sep-area editor-area] (tui/vsplit area :fill 1 ed-height))
   @{:chat chat-area :separator sep-area :editor editor-area})
 
 (defn- sync-ui-layout
@@ -48,7 +49,8 @@
   (when-let [ed-w (widget/get-widget :editor)]
     (when (ed-w :rect)
       (def r (ed-w :rect))
-      (put layout :input-row (+ (r :y) 1)))))
+      (put layout :input-row (+ (r :y) (r :height)))
+      (put layout :editor-height (r :height)))))
 
 # ── Double buffering ───────────────────────────────────────────
 
@@ -68,36 +70,70 @@
   (set prev-buf nil))
 
 (defn- render-frame
-  "Render all dirty widgets into a fresh buffer, diff against previous, flush."
+  "Render dirty widgets, diff against previous frame, flush."
   []
   (when (nil? screen-area) (break))
-  (def buf (tui/buffer screen-area))
 
-  # Render all widgets into the buffer
-  (each name (widget/list-widgets)
-    (when-let [w (widget/get-widget name)]
-      (when (and (w :rect) (w :render))
-        # Always render into fresh buffer (dirty tracking is per-widget)
-        ((w :render) w (w :rect) buf)
-        (put w :dirty false))))
-
-  # Diff and flush
-  (if prev-buf
-    (do
-      (def diff (tui/buffer-diff prev-buf buf))
-      (when (not= "" diff)
-        (term/write diff)))
+  (if (nil? prev-buf)
     # First frame or after resize — full render
-    (term/write (tui/buffer->str buf)))
+    (do
+      (def buf (tui/buffer screen-area))
+      (each name (widget/list-widgets)
+        (when-let [w (widget/get-widget name)]
+          (when (and (w :rect) (w :render))
+            ((w :render) w (w :rect) buf)
+            (put w :dirty false))))
+      (term/write (tui/buffer->str buf))
+      (set prev-buf buf))
 
-  # Swap
-  (set prev-buf buf)
+    # Incremental: render only dirty widget rects, diff just those areas
+    (do
+      (each name (widget/list-widgets)
+        (when-let [w (widget/get-widget name)]
+          (when (and (w :dirty) (w :rect) (w :render))
+            (def r (w :rect))
+            # Render into a small buffer covering just this widget's rect
+            (def small-buf (tui/buffer r))
+            ((w :render) w r small-buf)
+            (put w :dirty false)
+            # Diff this rect between prev-buf and small-buf, emit changes
+            (def parts @[])
+            (var cur-style nil)
+            (var expected-col nil)
+            (for row 0 (r :height)
+              (def y (+ (r :y) row))
+              (set expected-col nil)
+              (for col 0 (r :width)
+                (def x (+ (r :x) col))
+                (def old-c (tui/buffer-get prev-buf x y))
+                (def new-c (tui/buffer-get small-buf x y))
+                (unless (and (= (old-c :ch) (new-c :ch))
+                             (deep= (old-c :style) (new-c :style)))
+                  (when (or (nil? expected-col) (not= col expected-col))
+                    (array/push parts
+                      (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
+                  (def st (new-c :style))
+                  (when (not (deep= st cur-style))
+                    (array/push parts "\x1b[0m")
+                    (def sgr (tui/style->sgr st))
+                    (when (not= sgr "") (array/push parts sgr))
+                    (set cur-style st))
+                  (array/push parts (new-c :ch))
+                  (set expected-col (+ col 1))
+                  # Update prev-buf in place
+                  (tui/buffer-set-char prev-buf x y (new-c :ch) (new-c :style)))))
+            (when (not (empty? parts))
+              (array/push parts "\x1b[0m")
+              (term/write (string ;parts))))))))
 
   # Restore cursor to editor position
-  (def ed-w (widget/get-widget :editor))
-  (when (and ed-w (ed-w :rect))
-    (def r (ed-w :rect))
-    (editor/redraw)))
+  (editor/redraw))
+
+(defn force-rerender
+  "Force a full screen redraw on the next frame."
+  []
+  (set prev-buf nil)
+  (widget/mark-all-dirty))
 
 # ── Eval ───────────────────────────────────────────────────────
 
@@ -149,7 +185,9 @@
   (term/write "\x1b[?25h")    # show cursor
   (term/write "\x1b[?1000h")  # enable mouse button tracking (includes scroll)
   (term/write "\x1b[?1006h")  # enable SGR extended mouse mode
+  (term/write "\x1b[>1u")     # enable Kitty keyboard protocol (disambiguate Shift+Enter etc.)
   (defer (do
+    (term/write "\x1b[<u")      # pop Kitty keyboard enhancement flags
     (term/write "\x1b[?1006l")  # disable SGR mouse mode
     (term/write "\x1b[?1000l")  # disable mouse tracking
     (term/write "\x1b[?25h")
@@ -243,8 +281,34 @@
                 (widget/dispatch :editor next))))
 
           # All other events → editor widget
+          # Batch key events for paste performance: drain all pending
+          # key events before rendering, like we do for scroll events.
           (do
-            (def result (widget/dispatch :editor ev))
+            (editor/batch-begin)
+            (var result (widget/dispatch :editor ev))
+            (var leftover nil)
+            (when (nil? result)
+              (var next-ev (term/read-event 0))
+              (while (and next-ev (= :key (get next-ev :type)))
+                (set result (widget/dispatch :editor next-ev))
+                (when result (break))
+                (set next-ev (term/read-event 0)))
+              (when (and next-ev (nil? result))
+                (set leftover next-ev)))
+            (editor/batch-end)
+
+            # Handle any leftover non-key event from the drain
+            (when leftover
+              (def lt (get leftover :type))
+              (cond
+                (= :resize lt)
+                (do (refresh-and-layout) (widget/mark-all-dirty))
+                (= :scroll lt)
+                (do
+                  (def dir (get leftover :direction))
+                  (widget/dispatch :chat
+                    {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
+
             (cond
               (= result :quit)
               (do (chat/cleanup) (break))
@@ -282,7 +346,10 @@
               (widget/dispatch :chat {:type :scroll-line-up})
 
               (= result :scroll-line-down)
-              (widget/dispatch :chat {:type :scroll-line-down})))))
+              (widget/dispatch :chat {:type :scroll-line-down})
+
+              (= result :rerender)
+              (force-rerender)))))
 
       # 4. Update all widgets (chat drains stream, polls tools)
       (widget/update-all)
@@ -290,5 +357,10 @@
       # 5. Tick widget timers
       (widget/tick-timers)
 
-      # 6. Render frame (diff-based)
+      # 6. Re-layout if editor height changed
+      (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
+        (refresh-and-layout)
+        (widget/mark-all-dirty))
+
+      # 7. Render frame (diff-based)
       (render-frame))))
