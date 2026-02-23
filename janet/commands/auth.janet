@@ -3,17 +3,18 @@
 (import core/commands :as commands)
 (import core/auth :as auth)
 (import core/registers :as reg)
+(import widgets/editor :as editor-prompt)
+(import widgets/chat :as chat)
 
 # ── /login ─────────────────────────────────────────────────────
 
 (commands/register "login"
   {:description "Login to an OAuth provider (e.g., /login anthropic)"
-   :usage "/login [provider] [code]"
+   :usage "/login [provider]"
    :function
    (fn [args]
      (def parts (string/split " " (string/trim args) 2))
      (def provider-id (get parts 0 ""))
-     (def code-arg (get parts 1 ""))
 
      # If no provider specified, list available ones
      (when (= "" provider-id)
@@ -41,41 +42,11 @@
                       "\n\nTo set an API key directly:\n"
                       "  /auth-key <provider> <key>")))
 
-     # If code is provided, complete the flow (step 2)
-     (when (not= "" code-arg)
-       (def pending (reg/get :pending-login))
-       (when (or (nil? pending) (not= (pending :provider) provider-id))
-         (break (string "No pending login for " provider-id ". Run /login " provider-id " first.")))
-
-       (try
-         (do
-           (def credentials (auth/anthropic-exchange-code code-arg (pending :pkce)))
-           (auth/set-credential provider-id credentials)
-           (reg/set :pending-login nil)
-           (string "✓ Logged in to " (provider :name)))
-         ([err]
-           (reg/set :pending-login nil)
-           (string "✗ Login failed: " (string err)))))
-
-     # Step 1: Start the OAuth flow — show URL, ask for code
+     # Start the OAuth flow — generate PKCE, open browser, prompt for code
      (try
        (do
-         (var auth-url nil)
-         # Generate PKCE and get the auth URL by calling the provider's login
-         # with a callback that captures the URL but returns a special code
-         # to indicate we're in step 1
-         #
-         # Actually, we need to split the login flow. The auth module's login
-         # function does the full flow in one shot. For the TUI, we need to
-         # generate the URL, show it, and then wait for the user to come back
-         # with /login provider <code>.
-         #
-         # For Anthropic specifically, we can generate the PKCE + URL here,
-         # stash the verifier, and complete when the user provides the code.
-
          (def pkce (auth/generate-pkce))
          (def url (auth/anthropic-auth-url pkce))
-         (reg/set :pending-login @{:provider provider-id :pkce pkce})
 
          # Try to open browser (fire-and-forget — don't block the TUI)
          (def open-cmd
@@ -87,16 +58,31 @@
                nil)))
          (when open-cmd
            (try
-             # Use sh -c with & to avoid blocking on the browser
              (process/exec "sh" ["-c" (string open-cmd " '" url "' &")])
              ([_] nil)))
+
+         # Activate the inline prompt to collect the authorization code
+         (editor-prompt/start-prompt
+           {:label "token:"
+            :mask false
+            :callback
+            (fn [code-input]
+              (if (or (nil? code-input) (= "" (string/trim code-input)))
+                (chat/output-info "Login cancelled — no code provided.")
+                (try
+                  (do
+                    (def credentials (auth/anthropic-exchange-code code-input pkce))
+                    (auth/set-credential provider-id credentials)
+                    (chat/output-info (string "✓ Logged in to " (provider :name))))
+                  ([err]
+                    (chat/output-error (string "Login failed: " (string err)))))))})
 
          (string "Opening browser for " (provider :name) " login...\n"
                  "\n"
                  "  " url "\n"
                  "\n"
-                 "After authorizing, paste the code:\n"
-                 "  /login " provider-id " <paste-code-here>"))
+                 "After authorizing, paste the code below and press Enter.\n"
+                 "(Press Escape to cancel)"))
        ([err]
          (string "✗ Login setup failed: " (string err)))))})
 
