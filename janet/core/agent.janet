@@ -24,6 +24,7 @@
 (import widgets/chat :as chat)
 (import widgets/editor :as editor-w)
 (import widgets/separator :as sep)
+(import core/completion :as completion)
 
 # ── Layout ─────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@
 
 (var- prev-buf nil)
 (var- screen-area nil)
+(var- popup-was-visible false)
 
 (defn- refresh-and-layout
   "Refresh terminal size, do widget layout, sync, create buffers."
@@ -73,6 +75,13 @@
   "Render dirty widgets, diff against previous frame, flush."
   []
   (when (nil? screen-area) (break))
+
+  # If the popup was visible last frame, force-repaint the widgets it
+  # overlapped so their clean cells overwrite the stale popup in prev-buf.
+  (when popup-was-visible
+    (widget/mark-dirty :chat)
+    (widget/mark-dirty :separator)
+    (set popup-was-visible false))
 
   (if (nil? prev-buf)
     # First frame or after resize — full render
@@ -125,6 +134,31 @@
             (when (not (empty? parts))
               (array/push parts "\x1b[0m")
               (term/write (string ;parts))))))))
+
+  # Render completion popup overlay (if active)
+  (when (and prev-buf screen-area (completion/active?))
+    (def [cursor-row cursor-col] (editor/get-cursor-screen-pos))
+    (when (and cursor-row cursor-col)
+      (def popup (completion/render-popup cursor-row cursor-col screen-area))
+      (when popup
+        (set popup-was-visible true)
+        (def parts @[])
+        (var cur-style nil)
+        (each cell (popup :cells)
+          (def x (cell :x))
+          (def y (cell :y))
+          (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+          (def st (cell :style))
+          (when (not (deep= st cur-style))
+            (array/push parts "\x1b[0m")
+            (def sgr (tui/style->sgr st))
+            (when (not= sgr "") (array/push parts sgr))
+            (set cur-style st))
+          (array/push parts (cell :ch))
+          (tui/buffer-set-char prev-buf x y (cell :ch) st))
+        (when (not (empty? parts))
+          (array/push parts "\x1b[0m")
+          (term/write (string ;parts))))))
 
   # Restore cursor to editor position
   (editor/redraw))
