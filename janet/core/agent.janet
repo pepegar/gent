@@ -19,6 +19,7 @@
 (import core/registers :as reg)
 (import core/skills :as skills)
 (import core/agents-md :as agents-md)
+(import core/input-history :as ih)
 (import widgets/editor :as editor)
 (import tui)
 (import widgets/chat :as chat)
@@ -166,6 +167,7 @@
 (defn force-rerender
   "Force a full screen redraw on the next frame."
   []
+  (refresh-and-layout)
   (set prev-buf nil)
   (widget/mark-all-dirty))
 
@@ -267,6 +269,9 @@
     (def sid (conv/init))
     (chat/output-info (string "  session: " sid))
     (chat/output "")
+
+    # Load cross-session input history
+    (ih/init (conv/project-sessions-dir))
 
     # Initial render
     (widget/mark-all-dirty)

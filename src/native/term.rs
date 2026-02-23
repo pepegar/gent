@@ -169,13 +169,20 @@ fn suspend(_args: &mut [Janet]) -> Janet {
     // 1. Disable raw mode so the terminal is sane while suspended
     let _ = terminal::disable_raw_mode();
 
-    // 2. Show the cursor (it may be hidden) and reset scroll region
+    // 2. Leave alternate screen, disable mouse/keyboard protocols, show cursor
     use std::io::Write;
     {
         let stdout = std::io::stdout();
         let mut handle = stdout.lock();
-        // Reset scroll region, move to bottom, show cursor
-        let _ = handle.write_all(b"\x1b[r\x1b[999;1H\x1b[?25h\n");
+        let _ = handle.write_all(concat!(
+            "\x1b[<u",       // pop Kitty keyboard enhancement flags
+            "\x1b[?1006l",   // disable SGR mouse mode
+            "\x1b[?1000l",   // disable mouse tracking
+            "\x1b[r",        // reset scroll region
+            "\x1b[?25h",     // show cursor
+            "\x1b[?1049l",   // leave alternate screen buffer
+            "\n",
+        ).as_bytes());
         let _ = handle.flush();
     }
 
