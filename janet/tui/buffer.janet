@@ -62,13 +62,26 @@
     (put c :style st)))
 
 (defn buffer-set-string
-  "Write a string horizontally starting at (x, y). Clips to buffer bounds."
+  "Write a string horizontally starting at (x, y). Handles UTF-8. Clips to buffer bounds."
   [buf x y text &opt st]
   (default st style-default)
   (var col x)
-  (each byte text
-    (buffer-set-char buf col y (string/from-bytes byte) st)
-    (++ col)))
+  (var i 0)
+  (def len (length text))
+  (while (< i len)
+    (def byte (get text i))
+    # Determine UTF-8 character length from lead byte
+    (def char-len
+      (cond
+        (< byte 0x80) 1
+        (< byte 0xE0) 2
+        (< byte 0xF0) 3
+        4))
+    (def end (min (+ i char-len) len))
+    (def ch (string/slice text i end))
+    (buffer-set-char buf col y ch st)
+    (++ col)
+    (set i end)))
 
 (defn buffer-set-style
   "Apply a style to all cells within a rect (merged on top of existing)."
@@ -89,6 +102,42 @@
     (for y (clipped :y) (rect-bottom clipped)
       (for x (clipped :x) (rect-right clipped)
         (buffer-set-char buf x y ch st)))))
+
+# ── Buffer diffing ─────────────────────────────────────────────
+
+(defn buffer-diff
+  "Compare two buffers cell-by-cell. Returns an ANSI string that updates
+   only the changed cells. Both buffers must cover the same area."
+  [old-buf new-buf]
+  (def a (new-buf :area))
+  (def parts @[])
+  (var cur-style nil)
+
+  (for row 0 (a :height)
+    (var expected-col nil)
+    (for col 0 (a :width)
+      (def x (+ (a :x) col))
+      (def y (+ (a :y) row))
+      (def old-cell (buffer-get old-buf x y))
+      (def new-cell (buffer-get new-buf x y))
+      (unless (and (= (old-cell :ch) (new-cell :ch))
+                   (deep= (old-cell :style) (new-cell :style)))
+        # Cell changed — emit cursor move if not at expected position
+        (when (or (nil? expected-col) (not= col expected-col))
+          (array/push parts
+            (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
+        (def st (new-cell :style))
+        (when (not (deep= st cur-style))
+          (array/push parts "\x1b[0m")
+          (def sgr (style->sgr st))
+          (when (not= sgr "") (array/push parts sgr))
+          (set cur-style st))
+        (array/push parts (new-cell :ch))
+        (set expected-col (+ col 1)))))
+
+  (when (not (empty? parts))
+    (array/push parts "\x1b[0m"))
+  (string ;parts))
 
 # ── ANSI rendering ─────────────────────────────────────────────
 
