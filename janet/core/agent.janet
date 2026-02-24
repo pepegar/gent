@@ -105,7 +105,7 @@
           (when (and (w :dirty) (w :rect) (w :render))
             (def r (w :rect))
             # Render into a small buffer covering just this widget's rect
-            (def small-buf (tui/buffer r))
+            (def small-buf (tui/buffer r true))
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w r small-buf)))
             (put w :dirty false)

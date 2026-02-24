@@ -141,6 +141,34 @@ Moving the diff loop from Janet to compiled Rust eliminated the interpreter over
 
 **Expected impact**: During streaming, diff visits ~120-360 cells instead of 2900.
 
+### Phase 3 Measured Results (tui-wright, 100×30)
+
+**Scroll test:**
+```
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+render:frame               102      535.5       5.2       0.5       7.6
+render:chat                101      280.0       2.8       1.8       5.0
+event:scroll               100        0.9       0.0       0.0       0.0
+
+Diff cost (frame - chat):  ~2.4ms avg  (same as Phase 2)
+render:frame avg:           5.2ms      (was 4.9ms → slight regression from tracking overhead)
+render:chat avg:            2.8ms      (was 2.5ms → +0.3ms from buffer-set-char dirty marking)
+```
+
+**Streaming test:**
+```
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+render:frame               355      761.1       2.1       0.0       7.5
+render:chat                165      413.3       2.5       1.8       4.9
+
+render:frame avg:           2.1ms      (was 4.9ms → 57% improvement during streaming)
+Per-dirty-frame time:       ~4.6ms     (761.1 / 165 dirty frames)
+Diff cost (dirty frames):   ~2.1ms     (4.6 - 2.5)
+Effective streaming FPS:    >60fps     (most frames skip diff entirely)
+```
+
+During scroll, all rows change, so dirty tracking adds slight overhead (~0.3ms) with no benefit. During streaming, the real win appears: render:frame drops from 4.9ms to 2.1ms because ~54% of frames have no dirty widgets at all (diff returns instantly), and frames with dirty widgets only diff the 1-3 changed rows instead of all ~24.
+
 ---
 
 ## Phase 4: Terminal Scroll Regions

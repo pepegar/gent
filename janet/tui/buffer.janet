@@ -27,12 +27,19 @@
 # ── Buffer ─────────────────────────────────────────────────────
 
 (defn buffer
-  "Create a buffer for the given rect, filled with empty cells."
-  [area]
+  "Create a buffer for the given rect, filled with empty cells.
+   When track-dirty is true, adds a :dirty-rows array for row-level change tracking."
+  [area &opt track-dirty]
   (def n (rect-area area))
   (def cells (array/new n))
   (for _ 0 n (array/push cells @{:ch " " :style style-default}))
-  @{:area area :cells cells})
+  (def buf @{:area area :cells cells})
+  (when track-dirty
+    (def h (area :height))
+    (def dr (array/new h))
+    (for _ 0 h (array/push dr true))
+    (put buf :dirty-rows dr))
+  buf)
 
 (defn- buf-idx
   "Compute the flat index for (x, y) within a buffer."
@@ -59,7 +66,11 @@
              (>= y (a :y)) (< y (rect-bottom a)))
     (def c (get (buf :cells) (buf-idx buf x y)))
     (put c :ch ch)
-    (put c :style st)))
+    (put c :style st)
+    (when-let [dr (buf :dirty-rows)]
+      (def row (- y (a :y)))
+      (when (< row (length dr))
+        (put dr row true)))))
 
 (defn buffer-set-string
   "Write a string horizontally starting at (x, y). Handles UTF-8. Clips to buffer bounds."
@@ -88,10 +99,15 @@
   [buf area st]
   (def clipped (rect-intersection area (buf :area)))
   (when (not (rect-empty? clipped))
+    (def ba (buf :area))
     (for y (clipped :y) (rect-bottom clipped)
       (for x (clipped :x) (rect-right clipped)
         (def c (get (buf :cells) (buf-idx buf x y)))
-        (put c :style (style-merge (c :style) st))))))
+        (put c :style (style-merge (c :style) st)))
+      (when-let [dr (buf :dirty-rows)]
+        (def row (- y (ba :y)))
+        (when (< row (length dr))
+          (put dr row true))))))
 
 (defn buffer-fill
   "Fill a rect with a character and style."
