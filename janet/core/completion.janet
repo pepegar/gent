@@ -13,6 +13,11 @@
 (import core/skills :as skills)
 (import tui)
 
+# ── Popup rendering data ────────────────────────────────────
+
+(def- max-popup-width 50)
+(def- max-popup-height 8)
+
 # ── State ────────────────────────────────────────────────────
 
 (var- state :idle)
@@ -21,6 +26,7 @@
 (var- prefix "")
 (var- candidates @[])
 (var- selected 0)
+(var- scroll-offset 0)
 
 # ── Style ────────────────────────────────────────────────────
 
@@ -96,6 +102,55 @@
       (break)))
   results)
 
+# ── Source: Commits ──────────────────────────────────────────
+
+(var- commit-cache nil)
+(var- commit-cache-time 0)
+
+(defn- git-list-commits []
+  (try
+    (let [result (process/exec "git" ["log" "--oneline" "-50" "--pretty=format:%h %s"])]
+      (if (= 0 (get result :status))
+        (let [stdout (get result :stdout "")]
+          (if (= stdout "")
+            @[]
+            (string/split "\n" (string/trimr stdout))))
+        @[]))
+    ([_] @[])))
+
+(defn- get-commit-list []
+  (def now (os/clock))
+  (when (or (nil? commit-cache) (> (- now commit-cache-time) 300)) # Cache for 5 minutes
+    (set commit-cache (git-list-commits))
+    (set commit-cache-time now))
+  commit-cache)
+
+(defn- commit-candidates [pfx]
+  (def commits (get-commit-list))
+  (when (nil? commits) (break @[]))
+  (def lp (string/ascii-lower pfx))
+  (def results @[])
+  
+  (each commit commits
+    (def parts (string/split " " commit 0 2))
+    (when (>= (length parts) 2)
+      (def hash (get parts 0))
+      (def message (get parts 1))
+      # Match on hash prefix or message content
+      (when (or (string/has-prefix? lp (string/ascii-lower hash))
+                (string/find lp (string/ascii-lower message)))
+        (array/push results
+          {:label hash
+           :detail message
+           :insert hash})))
+    (when (>= (length results) 30)
+      (break)))
+  results)
+
+(defn refresh-commit-cache []
+  (set commit-cache nil)
+  (set commit-cache-time 0))
+
 # ── Trigger detection ────────────────────────────────────────
 
 (defn check-trigger
@@ -113,6 +168,9 @@
              (let [prev (get content (- pt 2))]
                (or (= prev (chr " ")) (= prev (chr "\n"))))))
     {:kind :command :start (- pt 1)}
+    
+    (= ch "#")
+    {:kind :commit :start (- pt 1)}
 
     nil))
 
@@ -129,7 +187,8 @@
   (set trigger-start start)
   (set prefix "")
   (set candidates @[])
-  (set selected 0))
+  (set selected 0)
+  (set scroll-offset 0))
 
 (defn dismiss []
   (set state :idle)
@@ -137,13 +196,15 @@
   (set trigger-start nil)
   (set prefix "")
   (set candidates @[])
-  (set selected 0))
+  (set selected 0)
+  (set scroll-offset 0))
 
 (defn get-trigger-start [] trigger-start)
 (defn get-trigger-kind [] trigger-kind)
 (defn get-candidates [] candidates)
 (defn get-selected [] selected)
 (defn get-prefix [] prefix)
+(defn get-scroll-offset [] scroll-offset)
 
 # ── Filtering ────────────────────────────────────────────────
 
@@ -178,23 +239,48 @@
                        (string/slice text-after-trigger 1)
                        "")]
         (file-candidates after-at))
+        
+      :commit
+      (let [after-hash (if (> (length text-after-trigger) 0)
+                         (string/slice text-after-trigger 1)
+                         "")]
+        (commit-candidates after-hash))
 
       @[]))
 
   (set candidates new-candidates)
+  (set scroll-offset 0)
   (when (>= selected (length candidates))
     (set selected (max 0 (- (length candidates) 1))))
   (length candidates))
 
 # ── Navigation ───────────────────────────────────────────────
 
+(defn- ensure-selected-visible []
+  "Adjust scroll-offset to ensure the selected item is visible."
+  (def visible-count (min (length candidates) max-popup-height))
+  (cond
+    # Selected item is above the visible window
+    (< selected scroll-offset)
+    (set scroll-offset selected)
+    
+    # Selected item is below the visible window
+    (>= selected (+ scroll-offset visible-count))
+    (set scroll-offset (- selected visible-count -1))))
+
 (defn select-next []
   (when (> (length candidates) 0)
-    (set selected (% (+ selected 1) (length candidates)))))
+    (if (< selected (- (length candidates) 1))
+      (set selected (+ selected 1))
+      (set selected 0)) # Wrap to beginning
+    (ensure-selected-visible)))
 
 (defn select-prev []
   (when (> (length candidates) 0)
-    (set selected (% (+ selected (- (length candidates) 1)) (length candidates)))))
+    (if (> selected 0)
+      (set selected (- selected 1))
+      (set selected (- (length candidates) 1))) # Wrap to end
+    (ensure-selected-visible)))
 
 # ── Accept ───────────────────────────────────────────────────
 
@@ -226,10 +312,12 @@
   (when (empty? candidates) (break nil))
 
   (def visible-count (min (length candidates) max-popup-height))
+  (def start-idx scroll-offset)
+  (def end-idx (min (+ start-idx visible-count) (length candidates)))
 
   (var max-label 0)
   (var max-detail 0)
-  (for i 0 (min (length candidates) max-popup-height)
+  (for i start-idx end-idx
     (def c (get candidates i))
     (set max-label (max max-label (length (c :label))))
     (set max-detail (max max-detail (length (c :detail)))))
@@ -256,10 +344,13 @@
   (array/push cells {:x (+ popup-x popup-width -1) :y popup-y :ch "\xE2\x94\x90" :style border-style})
 
   # Content rows
-  (for i 0 visible-count
-    (def y (+ popup-y 1 i))
-    (def c (get candidates i))
-    (def is-selected (= i selected))
+  (for row 0 visible-count
+    (def candidate-idx (+ start-idx row))
+    (when (>= candidate-idx (length candidates)) (break))
+    
+    (def y (+ popup-y 1 row))
+    (def c (get candidates candidate-idx))
+    (def is-selected (= candidate-idx selected))
     (def row-style (if is-selected selected-style normal-style))
     (def indicator (if is-selected ">" " "))
 
