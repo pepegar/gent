@@ -111,6 +111,95 @@ There are currently no Rust-side unit tests — all logic lives in Janet. `cargo
 cargo build && janet janet/test/run.janet
 ```
 
+## Profiling
+
+Gent has a built-in span-based profiling system (`janet/core/profile.janet`) that records Chrome Trace Event JSON for visualization in [speedscope.app](https://speedscope.app).
+
+### Enabling profiling
+
+```sh
+# Via environment variable (auto-enables on boot)
+GENT_PROFILE=1 cargo run
+
+# Or toggle during a session with slash commands
+/profile start
+/profile stop
+```
+
+### Collecting data
+
+During a session:
+- `/profile stats` — print a formatted table of per-operation timings (count, total, avg, min, max)
+- `/profile dump` — export Chrome Trace Event JSON to `.gent/profile-<timestamp>.json`
+- `/profile reset` — clear all profiling data (useful to isolate a specific interaction)
+
+### Interactive profiling with tui-wright
+
+For automated profiling of scroll, keyboard, and mouse interactions, use [tui-wright](https://github.com/pepegar/tui-wright) to spawn gent in a virtual terminal and send programmatic input:
+
+```sh
+# Spawn a bash shell (tui-wright daemon runs from $HOME, so use absolute paths or cd first)
+tui-wright spawn bash --cols 100 --rows 30
+# → session: abc123
+
+# CD to the project and launch gent with profiling
+tui-wright type abc123 "cd /path/to/gent && GENT_PROFILE=1 ./target/debug/gent"
+tui-wright key abc123 enter
+sleep 3
+
+# Send input
+tui-wright type abc123 "Hello, what is 2+2?"
+tui-wright key abc123 enter
+sleep 10
+
+# Send mouse scroll events
+tui-wright mouse abc123 scrollup 50 15
+tui-wright mouse abc123 scrolldown 50 15
+
+# Read the screen
+tui-wright screen abc123
+
+# Get profile stats
+tui-wright type abc123 "/profile stats"
+tui-wright key abc123 enter
+sleep 0.5
+# Scroll to bottom to see the output
+for i in $(seq 1 500); do tui-wright mouse abc123 scrolldown 50 15; done
+sleep 1
+tui-wright screen abc123
+
+# Export trace and clean up
+tui-wright type abc123 "/profile dump"
+tui-wright key abc123 enter
+sleep 0.5
+tui-wright key abc123 ctrl+c
+sleep 1
+tui-wright kill abc123
+```
+
+**Important notes for tui-wright + gent:**
+- The tui-wright daemon starts from `$HOME`, not the current directory. Always `cd` to the gent project root first, or use absolute paths.
+- Add `sleep` between actions — TUI apps need time to process input and redraw (0.2-0.5s after key/mouse events, 1-3s after launching gent or sending an LLM prompt).
+- Scroll events are coalesced by gent's reactor — rapid bursts will be batched into fewer dispatches. Use `/profile stats` with the `event:scroll` row's `coalesced` metadata in the trace to verify batching behavior.
+- Profile traces can be opened in https://speedscope.app for flame-graph visualization of nested spans (`reactor:loop` → `render:frame` → `render:chat`, etc.).
+
+### Key profiling spans
+
+| Span | Category | What it measures |
+|------|----------|-----------------|
+| `reactor:loop` | reactor | One full iteration of the event loop |
+| `event:poll` | io | Blocking wait for terminal event (includes idle time) |
+| `event:scroll` | event | Scroll event coalescing and dispatch |
+| `event:key` | event | Key event batching and dispatch |
+| `render:frame` | render | Full frame render (includes widget renders + diff + ANSI emission) |
+| `render:chat` | render | Chat widget render into buffer |
+| `render:editor` | render | Editor widget render |
+| `render:separator` | render | Separator widget render |
+| `stream:api-call` | stream | LLM API streaming call (wall clock) |
+| `stream:drain` | stream | Reading chunks from the HTTP stream |
+| `widget:update-all` | update | Per-frame widget polling (chat drains stream, polls tools) |
+| `tool:*` | tool | Individual tool execution (auto-instrumented via hooks) |
+
 ## Dependencies
 
 - **Rust** + **Cargo** for building
