@@ -967,10 +967,23 @@
 
   rows)
 
+(defn- line-to-visual-rows-cached
+  "Like line-to-visual-rows but caches results on the scrollback entry.
+   Cache hit when width matches :_cached-width."
+  [line width]
+  (if (and (= (get line :_cached-width) width) (get line :_cached-rows))
+    (line :_cached-rows)
+    (do
+      (def rows (line-to-visual-rows line width))
+      (when (table? line)
+        (put line :_cached-width width)
+        (put line :_cached-rows rows))
+      rows)))
+
 (defn- count-visual-rows
   "Count how many visual rows a scrollback line occupies at given width."
   [line width]
-  (length (line-to-visual-rows line width)))
+  (length (line-to-visual-rows-cached line width)))
 
 (defn- render-scrollback
   "Render the visible window of scrollback into a tui/buffer.
@@ -995,7 +1008,7 @@
   (var line-idx (- end-idx 1))
   (while (and (>= line-idx 0) (< (length visual-rows) render-height))
     (def line (get scrollback line-idx))
-    (def rows (line-to-visual-rows line width))
+    (def rows (line-to-visual-rows-cached line width))
     (def rs (line :row-style))
     (var ri (- (length rows) 1))
     (while (and (>= ri 0) (< (length visual-rows) render-height))
