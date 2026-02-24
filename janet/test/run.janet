@@ -26,7 +26,6 @@
    "test/test-registers"
    "test/test-abort"
    "test/test-buffers"
-   "test/test-editor"
    "test/test-widget"
    "test/test-chat"
    "test/test-chat-integration"

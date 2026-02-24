@@ -7,7 +7,6 @@
 (import core/tools :as tools)
 (import core/api :as api)
 (import core/ui :as ui)
-(import core/editor :as editor)
 (import core/widget :as widget)
 (import core/agent :as agent)
 (import core/skills :as skills)

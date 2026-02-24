@@ -16,7 +16,6 @@
 (import core/agents-md :as agents-md)
 (import core/skills :as skills)
 (import core/widget :as widget)
-(import core/editor :as editor)
 (import tui)
 
 # ── System prompt ──────────────────────────────────────────────
