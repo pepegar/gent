@@ -1303,8 +1303,10 @@
           (when (> actual 0) [:scroll-optimized actual :down]))
         (= etype :toggle-thinking)
         (do
-          (def visible (toggle-thinking-visibility))
-          (output-info (string "Thinking blocks: " (if visible "visible" "hidden"))))))
+          # Only toggle when idle to prevent rendering artifacts
+          (when (= mode :idle)
+            (def visible (toggle-thinking-visibility))
+            (output-info (string "Thinking blocks: " (if visible "visible" "hidden")))))))
 
     :update (fn [self] (tick))
 
