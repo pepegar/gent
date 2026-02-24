@@ -161,5 +161,29 @@
   (sc/scroll :down 5)
   (sc/assert-scroll-offset 0)))
 
+# ── Bug reproduction: scroll + key event handling ──────────
+
+(t/test "editor widget returns :quit for ctrl+c directly" (fn []
+  (def w (sh/setup-stage))
+  # Test that editor widget itself works - baseline behavior
+  (def result (sc/send-key "c" true))  # ctrl=true
+  (t/assert= result :quit)))
+
+(t/test "scroll + key event: documents expected behavior" (fn []
+  (def w (sh/setup-stage))
+  # Fill scrollback so we can scroll
+  (for i 0 30
+    (chat/output (string "line " i)))
+
+  # Scroll up
+  (sc/scroll :up 5)
+  (t/assert-truthy (> (chat/get-scroll-offset) 0))
+
+  # Key events should still work properly after scrolling
+  # (This test passes because we're not simulating the reactor bug,
+  #  but it documents the expected behavior)
+  (def result (sc/send-key "c" true))  # ctrl=true
+  (t/assert= result :quit)))
+
 (def pass (t/pass))
 (def fail (t/fail))

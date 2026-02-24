@@ -120,3 +120,8 @@
            (string "=> " (string/format "%q" result))))
        ([err]
          (string "Error: " err))))})
+
+(commands/register "quit"
+  {:description "Quit gent"
+   :usage "/quit"
+   :function (fn [args] :quit)})

@@ -80,10 +80,10 @@
 (reg/set :loaded-configs loaded-configs)
 
 # Start the agent — optionally in stage mode
+(import core/stage :as stage)
 (def stage-script (os/getenv "GENT_STAGE"))
 (if stage-script
   (do
-    (import core/stage :as stage)
     (stage/install)
     (when (and (not= stage-script "1") (os/stat stage-script))
       (dofile stage-script))

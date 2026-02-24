@@ -64,6 +64,14 @@
     (widget/dispatch :editor
       {:type :key :key (string/from-bytes byte)})))
 
+(defn send-key [key &opt ctrl alt shift]
+  "Send a key event to the editor widget. Returns the result."
+  (default ctrl false)
+  (default alt false) 
+  (default shift false)
+  (widget/dispatch :editor
+    {:type :key :key key :ctrl ctrl :alt alt :shift shift}))
+
 (defn resize [cols rows]
   "Set terminal dimensions and re-layout."
   (widget/do-layout (tui/rect 0 0 cols rows)))

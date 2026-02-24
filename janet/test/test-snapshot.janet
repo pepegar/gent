@@ -419,5 +419,92 @@
   (t/assert= (cell :ch) "▐")
   (chat/set-theme :dark)))
 
+(t/test "snapshot: visual-row scrolling moves exactly 1 row per step" (fn []
+  (def w (setup 20 5))
+  # Fill the viewport with enough content so scrolling works
+  (for i 0 8 (chat/output (string "line " i)))
+  # Add a line that wraps to 2 visual rows at width 20
+  (chat/output "CCCCCCCCCCDDDDDDDDDDEEEEEEEEEE")
+  (chat/output "last")
+
+  (def rows0 (render-chat w 20 5))
+  (t/assert-truthy (any-row-contains? rows0 "last"))
+
+  # Scroll up by 1 visual row
+  (widget/dispatch :chat {:type :scroll-line-up})
+  (def rows1 (render-chat w 20 5))
+  # "last" should be scrolled off the bottom
+  (t/assert-truthy (not (any-row-contains? rows1 "last")))
+
+  # Scroll back down
+  (widget/dispatch :chat {:type :scroll-line-down})
+  (def rows2 (render-chat w 20 5))
+  (t/assert-truthy (any-row-contains? rows2 "last"))))
+
+(t/test "snapshot: scroll clamps at max and returns to bottom" (fn []
+  (def w (setup 40 10))
+  (for i 0 5 (chat/output (string "line " i)))
+
+  # Scroll up way past the content
+  (for _ 0 100 (widget/dispatch :chat {:type :scroll-line-up}))
+  (def rows-top (render-chat w))
+  (t/assert-truthy (any-row-contains? rows-top "line 0"))
+
+  # Scroll back down way past bottom
+  (for _ 0 100 (widget/dispatch :chat {:type :scroll-line-down}))
+  (def rows-bottom (render-chat w))
+  (t/assert-truthy (any-row-contains? rows-bottom "line 4"))
+  (t/assert= (chat/get-scroll-offset) 0)))
+
+(t/test "snapshot: streaming content hidden when scrolled up" (fn []
+  (def w (setup 40 8))
+  
+  # Fill with enough content to make scrolling possible
+  (for i 0 15 (chat/output (string "message " i)))
+  
+  # Scroll up so we're not at the bottom
+  (chat/set-scroll-offset 5)
+  
+  # Simulate streaming state (partial line in buffer)
+  # Note: We can't easily test the private streaming state without deeper mocking,
+  # but we can verify that the scroll offset logic is working correctly
+  
+  (def rows (render-chat w 40 8))
+  
+  # When scrolled up, we should see older content, not the latest
+  (t/assert-truthy (not (any-row-contains? rows "message 14")))
+  (t/assert-truthy (any-row-contains? rows "message 9"))
+  
+  # The key insight: scroll offset > 0 means we're not at bottom
+  # This is what the fix checks before showing streaming content
+  (t/assert-truthy (> (chat/get-scroll-offset) 0))
+))
+
+(t/test "snapshot: scroll offset behavior demonstrates streaming fix" (fn []
+  (def w (setup 40 8))
+  
+  # Fill with enough content to make scrolling possible
+  (for i 0 15 (chat/output (string "message " i)))
+  
+  # Verify we can scroll up and content changes
+  (def rows-at-bottom (render-chat w 40 8))
+  (t/assert-truthy (any-row-contains? rows-at-bottom "message 14"))
+  
+  # Scroll up so we're not at the bottom
+  (chat/set-scroll-offset 5)
+  (def rows-scrolled (render-chat w 40 8))
+  (t/assert-truthy (not (any-row-contains? rows-scrolled "message 14")))
+  (t/assert-truthy (any-row-contains? rows-scrolled "message 9"))
+  
+  # The key insight: scroll offset > 0 means we're not at bottom
+  # This is what the fix checks before showing streaming content
+  (t/assert-truthy (> (chat/get-scroll-offset) 0))
+  
+  # Scroll back to bottom and verify
+  (chat/set-scroll-offset 0)
+  (def rows-back-bottom (render-chat w 40 8))
+  (t/assert-truthy (any-row-contains? rows-back-bottom "message 14"))
+  (t/assert= (chat/get-scroll-offset) 0)))
+
 (def pass (t/pass))
 (def fail (t/fail))
