@@ -102,6 +102,29 @@
       (array/push lines (sse-line @{:type "message_stop"}))
       (array/push lines "data: [DONE]"))
 
+    (= gtype :thinking-then-text)
+    (do
+      (array/push lines (sse-line @{:type "message_start"
+                                     :message @{:id "msg_stage" :type "message"
+                                                :role "assistant" :content @[]
+                                                :model "stage" :stop_reason nil}}))
+      (array/push lines (sse-line @{:type "content_block_start" :index 0
+                                     :content_block @{:type "thinking" :thinking ""}}))
+      (each ch (utf8-chars (gen :thinking))
+        (array/push lines (sse-line @{:type "content_block_delta" :index 0
+                                       :delta @{:type "thinking_delta" :thinking ch}})))
+      (array/push lines (sse-line @{:type "content_block_stop" :index 0}))
+      (array/push lines (sse-line @{:type "content_block_start" :index 1
+                                     :content_block @{:type "text" :text ""}}))
+      (array/push lines (sse-line @{:type "content_block_delta" :index 1
+                                     :delta @{:type "text_delta"
+                                              :text (gen :content)}}))
+      (array/push lines (sse-line @{:type "content_block_stop" :index 1}))
+      (array/push lines (sse-line @{:type "message_delta"
+                                     :delta @{:stop_reason "end_turn"}}))
+      (array/push lines (sse-line @{:type "message_stop"}))
+      (array/push lines "data: [DONE]"))
+
     (= gtype :custom)
     (do
       (def custom-lines ((gen :function) (gen :conversation)))
@@ -125,6 +148,11 @@
   "Generate a tool call response."
   @{:type :tool-call :name name :input input
     :id (if (nil? id) "stage_tool_1" id) :delay (if (nil? delay) 0 delay)})
+
+(defn thinking-then-text [thinking-content text-content &named delay]
+  "Generate a response with thinking followed by text."
+  @{:type :thinking-then-text :thinking thinking-content :content text-content
+    :delay (if (nil? delay) 0 delay)})
 
 (defn custom [f]
   "Custom generator: (fn [conversation] ...) returns SSE lines."

@@ -74,6 +74,34 @@
     (string `data: {"type":"message_stop"}`)
     "data: [DONE]"])
 
+(defn thinking-response
+  "Build SSE lines for a thinking-only response."
+  [thinking-text]
+  (def escaped (string/replace-all `"` `\"` (string/replace-all `\` `\\` thinking-text)))
+  @[(string `data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","content":[],"model":"test","stop_reason":null}}`)
+    (string `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
+    (string `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` escaped `"}}`)
+    (string `data: {"type":"content_block_stop","index":0}`)
+    (string `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`)
+    (string `data: {"type":"message_stop"}`)
+    "data: [DONE]"])
+
+(defn thinking-then-text-response
+  "Build SSE lines for a response with thinking followed by text."
+  [thinking-text text]
+  (def escaped-thinking (string/replace-all `"` `\"` (string/replace-all `\` `\\` thinking-text)))
+  (def escaped-text (string/replace-all `"` `\"` (string/replace-all `\` `\\` text)))
+  @[(string `data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","content":[],"model":"test","stop_reason":null}}`)
+    (string `data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
+    (string `data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` escaped-thinking `"}}`)
+    (string `data: {"type":"content_block_stop","index":0}`)
+    (string `data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`)
+    (string `data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"` escaped-text `"}}`)
+    (string `data: {"type":"content_block_stop","index":1}`)
+    (string `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`)
+    (string `data: {"type":"message_stop"}`)
+    "data: [DONE]"])
+
 (defn error-response
   "Build SSE lines for an error response."
   [message]

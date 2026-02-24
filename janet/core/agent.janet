@@ -61,6 +61,7 @@
 (var- screen-area nil)
 (var- popup-was-visible false)
 (var- pending-scroll-opt nil)
+(var- should-quit false)
 
 (defn- scroll-region-optimize
   "Apply terminal scroll region optimization for the chat widget.
@@ -324,7 +325,8 @@
     (render-frame)
 
     # ── The reactor loop ───────────────────────────────────────
-    (while true
+    (set should-quit false)
+    (while (not should-quit)
       (profile/with-span "reactor:loop" "reactor" (fn []
 
       # 1. Determine poll timeout
@@ -368,9 +370,57 @@
               (cond
                 (= :resize next-type)
                 (do (refresh-and-layout) (widget/mark-all-dirty))
-                # Key events → editor
+                # Key events → editor (capture result and handle it)
                 (= :key next-type)
-                (widget/dispatch :editor next))))
+                (do
+                  (def key-result (widget/dispatch :editor next))
+                  (cond
+                    (= key-result :quit)
+                    (do (chat/cleanup) (set should-quit true) (break))
+
+                    (= key-result :stop)
+                    (chat/stop)
+
+                    (string? key-result)
+                    (when (not= "" key-result)
+                      (def cmd-result (commands/dispatch key-result))
+                      (if (get cmd-result :handled)
+                        (if (= :quit (get cmd-result :result))
+                          (do (chat/cleanup) (set should-quit true) (break))
+                          (do
+                            (chat/output-user key-result)
+                            (def r (get cmd-result :result))
+                            (when (and r (not= "" r))
+                              (each line (string/split "\n" r)
+                                (chat/output-info line)))
+                            (widget/mark-dirty :separator)))
+                        (chat/submit key-result)))
+
+                    (and (tuple? key-result) (= :eval (first key-result)))
+                    (do
+                      (def code (get key-result 1))
+                      (when (and code (not= "" code))
+                        (eval-janet-inline code)))
+
+                    # Scroll signals → chat widget
+                    (= key-result :scroll-up)
+                    (widget/dispatch :chat {:type :scroll-up})
+
+                    (= key-result :scroll-down)
+                    (widget/dispatch :chat {:type :scroll-down})
+
+                    (= key-result :scroll-line-up)
+                    (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
+                      (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                        (scroll-region-optimize (get sr 1) (get sr 2))))
+
+                    (= key-result :scroll-line-down)
+                    (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
+                      (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                        (scroll-region-optimize (get sr 1) (get sr 2))))
+
+                    (= key-result :rerender)
+                    (force-rerender))))))
 
           # All other events → editor widget
           # Batch key events for paste performance: drain all pending
@@ -403,7 +453,7 @@
 
             (cond
               (= result :quit)
-              (do (chat/cleanup) (break))
+              (do (chat/cleanup) (set should-quit true) (break))
 
               (= result :stop)
               (chat/stop)
@@ -412,13 +462,15 @@
               (when (not= "" result)
                 (def cmd-result (commands/dispatch result))
                 (if (get cmd-result :handled)
-                  (do
-                    (chat/output-user result)
-                    (def r (get cmd-result :result))
-                    (when (and r (not= "" r))
-                      (each line (string/split "\n" r)
-                        (chat/output-info line)))
-                    (widget/mark-dirty :separator))
+                  (if (= :quit (get cmd-result :result))
+                    (do (chat/cleanup) (set should-quit true) (break))
+                    (do
+                      (chat/output-user result)
+                      (def r (get cmd-result :result))
+                      (when (and r (not= "" r))
+                        (each line (string/split "\n" r)
+                          (chat/output-info line)))
+                      (widget/mark-dirty :separator)))
                   (chat/submit result)))
 
               (and (tuple? result) (= :eval (first result)))
@@ -443,6 +495,9 @@
               (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
                 (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
                   (scroll-region-optimize (get sr 1) (get sr 2))))
+
+              (= result :toggle-thinking)
+              (widget/dispatch :chat {:type :toggle-thinking})
 
               (= result :rerender)
               (force-rerender))))))

@@ -432,6 +432,10 @@
           (put self :dirty true)
           :rerender)
 
+        # Ctrl+T: toggle thinking visibility
+        (and ctrl (= key "t"))
+        :toggle-thinking
+
         # All other keys → editor_new, then check trigger
         (do
           # Reset history browsing on any text-modifying key
@@ -440,7 +444,7 @@
                          (= key :backspace)
                          (= key :delete)
                          (and ctrl (or (= key "k") (= key "u") (= key "w") (= key "d")
-                                       (= key "h") (= key "t")))
+                                       (= key "h")))
                          (and alt (or (= key "d") (= key :backspace)))))
             (ih/reset))
           (ed/handle-key editor-state event)

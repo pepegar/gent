@@ -36,6 +36,7 @@
    "test/test-profile"
    "test/test-stage"
    "test/test-scenario"
+   "test/test-thinking"
    "test/test-editor-scroll"])
 
 # Install native function mocks (http, json, term, process) so that

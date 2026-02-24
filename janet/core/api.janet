@@ -26,11 +26,15 @@
     :model (or (os/getenv "GENT_MODEL") (defaults :model))
     :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
                   (if env (scan-number env) (defaults :max-tokens)))
-    :api-key nil})  # nil means "resolve dynamically via auth module"
+    :api-key nil  # nil means "resolve dynamically via auth module"
+    :thinking-enabled true
+    :thinking-budget 4096})
 
 (defn set-url [url] (put config :url url))
 (defn set-model [m] (put config :model m))
 (defn set-max-tokens [n] (put config :max-tokens n))
+(defn set-thinking-enabled [v] (put config :thinking-enabled (truthy? v)))
+(defn set-thinking-budget [n] (put config :thinking-budget n))
 
 (defn set-api-key
   "Set an explicit API key. This takes highest priority.
@@ -111,10 +115,17 @@
     system-prompt))
 
 (defn- build-body [conversation tools &opt system-prompt]
+  (def budget (config :thinking-budget))
+  (def max-tok (config :max-tokens))
   (def body @{:model (config :model)
-              :max_tokens (config :max-tokens)
+              :max_tokens (if (and (config :thinking-enabled) (<= max-tok budget))
+                            (+ budget 4096)
+                            max-tok)
               :messages conversation
               :tools tools})
+  (when (config :thinking-enabled)
+    (put body :thinking @{:type "enabled"
+                          :budget_tokens budget}))
   (def effective-prompt (wrap-system-prompt system-prompt))
   (when effective-prompt
     (put body :system effective-prompt))
@@ -135,11 +146,18 @@
 
 (defn- build-body-stream [conversation tools &opt system-prompt]
   "Build request body with stream: true."
+  (def budget (config :thinking-budget))
+  (def max-tok (config :max-tokens))
   (def body @{:model (config :model)
-              :max_tokens (config :max-tokens)
+              :max_tokens (if (and (config :thinking-enabled) (<= max-tok budget))
+                            (+ budget 4096)
+                            max-tok)
               :messages conversation
               :tools tools
               :stream true})
+  (when (config :thinking-enabled)
+    (put body :thinking @{:type "enabled"
+                          :budget_tokens budget}))
   (def effective-prompt (wrap-system-prompt system-prompt))
   (when effective-prompt
     (put body :system effective-prompt))
@@ -171,6 +189,8 @@
   (var current-input-json @"")
   (def content-blocks @[])
   (def text-accum @"")
+  (def thinking-accum @"")
+  (def thinking-signature @"")
   (var usage nil)
   (var had-error false)
 
@@ -208,7 +228,10 @@
             (set current-tool-name (get block :name))
             (buffer/clear current-input-json))
           (when (= "text" current-block-type)
-            (buffer/clear text-accum)))
+            (buffer/clear text-accum))
+          (when (= "thinking" current-block-type)
+            (buffer/clear thinking-accum)
+            (buffer/clear thinking-signature)))
 
         # content_block_delta — incremental content
         "content_block_delta"
@@ -226,8 +249,14 @@
             "thinking_delta"
             (do
               (def text (get delta :thinking ""))
+              (buffer/push thinking-accum text)
               (when-let [cb (get callbacks :on-thinking)]
                 (cb text)))
+
+            "signature_delta"
+            (do
+              (def sig (get delta :signature ""))
+              (buffer/push thinking-signature sig))
 
             "input_json_delta"
             (do
@@ -241,6 +270,14 @@
             "text"
             (array/push content-blocks
                         {:type "text" :text (string text-accum)})
+
+            "thinking"
+            (do
+              (def block @{:type "thinking"
+                           :thinking (string thinking-accum)})
+              (when (> (length thinking-signature) 0)
+                (put block :signature (string thinking-signature)))
+              (array/push content-blocks block))
 
             "tool_use"
             (do

@@ -203,6 +203,8 @@
   "Return the current chat mode (:idle, :streaming, or :tools)."
   [] mode)
 
+(var- thinking-state @{:active false :buf @"" :visible false :char-count 0})
+
 (defn reset-state
   "Reset chat state for testing. Clears scrollback, resets mode to idle."
   []
@@ -211,7 +213,11 @@
   (set mode :idle)
   (set stream-ctx nil)
   (array/clear steering-queue)
-  (array/clear followup-queue))
+  (array/clear followup-queue)
+  (buffer/clear (thinking-state :buf))
+  (put thinking-state :active false)
+  (put thinking-state :visible false)
+  (put thinking-state :char-count 0))
 
 # ── Color scheme (Catppuccin) ─────────────────────────────────
 #
@@ -235,7 +241,9 @@
       :diff-red-fg   (tui/style :fg [:rgb 243 139 168] :bg [:rgb 60 30 42])  # Red on tinted surface
       :diff-green-fg (tui/style :fg [:rgb 166 227 161] :bg [:rgb 30 58 42])  # Green on tinted surface
       :user-row-bg     (tui/style :bg [:rgb 30 34 66])              # Blue-tinted Surface0
+      :thinking-label  (tui/style :fg [:rgb 148 148 184] :italic true) # Lavender dimmed
       :agent-row-bg    (tui/style :bg [:rgb 56 40 48])              # Peach-tinted Surface0
+      :thinking-row-bg (tui/style :bg [:rgb 40 38 58])              # Lavender-tinted Surface0
       :tool-row-bg     (tui/style :bg [:rgb 34 52 52])              # Green-tinted Surface0
       :tool-success-bg (tui/style :bg [:rgb 30 56 44])              # Deeper green
       :tool-error-bg   (tui/style :bg [:rgb 62 30 44])              # Deeper red
@@ -255,7 +263,9 @@
       :diff-red-fg   (tui/style :fg [:rgb 210 15 57] :bg [:rgb 245 218 222])  # Red on pink-tinted
       :diff-green-fg (tui/style :fg [:rgb 64 160 43] :bg [:rgb 218 240 218])  # Green on green-tinted
       :user-row-bg     (tui/style :bg [:rgb 220 225 248])           # Blue-tinted Mantle
+      :thinking-label  (tui/style :fg [:rgb 114 110 140] :italic true) # Lavender dimmed
       :agent-row-bg    (tui/style :bg [:rgb 244 228 218])           # Peach-tinted Mantle
+      :thinking-row-bg (tui/style :bg [:rgb 228 226 242])           # Lavender-tinted Mantle
       :tool-row-bg     (tui/style :bg [:rgb 222 238 224])           # Green-tinted Mantle
       :tool-success-bg (tui/style :bg [:rgb 218 240 222])           # Deeper green
       :tool-error-bg   (tui/style :bg [:rgb 246 218 224])           # Deeper red
@@ -296,16 +306,98 @@
   []
   (set-theme (detect-os-theme)))
 
+# ── Visual row expansion ──────────────────────────────────────
+# These must be defined before push-line (which uses count-visual-rows).
+
+(defn- line-to-visual-rows
+  "Convert a scrollback line into an array of visual rows.
+   Each visual row is an array of {:text :style} spans that fit within width.
+   Lines that exceed width wrap to additional rows."
+  [line width]
+  (def rows @[])
+  (var current-row @[])
+  (var col 0)
+
+  (defn- flush-row []
+    (when (> (length current-row) 0)
+      (array/push rows (array/slice current-row))
+      (array/clear current-row)
+      (set col 0)))
+
+  (defn- add-text-chars [text style]
+    (var ci 0)
+    (while (< ci (length text))
+      (when (>= col width)
+        (flush-row))
+      (def byte (get text ci))
+      (def char-len
+        (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+      (def cend (min (+ ci char-len) (length text)))
+      (def ch (string/slice text ci cend))
+      (array/push current-row @{:text ch :style style})
+      (++ col)
+      (set ci cend)))
+
+  (if (line :spans)
+    (each span (line :spans)
+      (def text (span :text))
+      (def st (or (span :style) (tui/style)))
+      (add-text-chars text st))
+    (do
+      (def text (or (line :text) ""))
+      (def st (or (line :style) (tui/style)))
+      (add-text-chars text st)))
+
+  # Flush any remaining content
+  (when (> (length current-row) 0)
+    (array/push rows (array/slice current-row)))
+
+  # Empty line still takes one visual row
+  (when (= 0 (length rows))
+    (array/push rows @[]))
+
+  rows)
+
+(defn- line-to-visual-rows-cached
+  "Like line-to-visual-rows but caches results on the scrollback entry.
+   Cache hit when width matches :_cached-width."
+  [line width]
+  (if (and (= (get line :_cached-width) width) (get line :_cached-rows))
+    (line :_cached-rows)
+    (do
+      (def rows (line-to-visual-rows line width))
+      (when (table? line)
+        (put line :_cached-width width)
+        (put line :_cached-rows rows))
+      rows)))
+
+(defn- count-visual-rows
+  "Count how many visual rows a scrollback line occupies at given width."
+  [line width]
+  (length (line-to-visual-rows-cached line width)))
+
+(defn- total-visual-rows
+  "Count total visual rows across all scrollback lines at given width."
+  [width]
+  (var total 0)
+  (each line scrollback
+    (set total (+ total (count-visual-rows line width))))
+  total)
+
 # ── Output helpers (scrollback-based) ─────────────────────────
 
 (defn- push-line
   "Add a styled line to the scrollback. Marks widget dirty.
-   When scrolled up (offset > 0), increments offset so the visible
-   window stays pinned to the same content."
+   When scrolled up (offset > 0), increments offset by the visual row
+   count of the new line so the visible window stays pinned."
   [text &opt style]
   (default style (tui/style))
-  (array/push scrollback @{:text text :style style})
-  (when (> scroll-offset 0) (++ scroll-offset))
+  (def new-line @{:text text :style style})
+  (array/push scrollback new-line)
+  (when (> scroll-offset 0)
+    (def w (widget/get-widget :chat))
+    (def width (if (and w (w :rect)) ((w :rect) :width) 80))
+    (set scroll-offset (+ scroll-offset (count-visual-rows new-line width))))
   # Cap scrollback size
   (when (> (length scrollback) max-scrollback)
     (array/remove scrollback 0 (- (length scrollback) max-scrollback)))
@@ -313,10 +405,14 @@
 
 (defn- push-raw-line
   "Add a pre-formatted line (array of spans) to the scrollback.
-   When scrolled up, increments offset to keep the view stable."
+   When scrolled up, increments offset by visual row count to keep the view stable."
   [spans]
-  (array/push scrollback @{:spans spans})
-  (when (> scroll-offset 0) (++ scroll-offset))
+  (def new-line @{:spans spans})
+  (array/push scrollback new-line)
+  (when (> scroll-offset 0)
+    (def w (widget/get-widget :chat))
+    (def width (if (and w (w :rect)) ((w :rect) :width) 80))
+    (set scroll-offset (+ scroll-offset (count-visual-rows new-line width))))
   (when (> (length scrollback) max-scrollback)
     (array/remove scrollback 0 (- (length scrollback) max-scrollback)))
   (widget/mark-dirty :chat))
@@ -618,6 +714,126 @@
     (put spinner-state :active false)
     (widget/mark-dirty :chat)))
 
+# ── Thinking display ──────────────────────────────────────────
+
+(defn- format-char-count [n]
+  (if (>= n 1000)
+    (string/format "%.1fk" (/ n 1000))
+    (string n)))
+
+(defn- thinking-delta [text]
+  (put thinking-state :active true)
+  (buffer/push (thinking-state :buf) text)
+  (put thinking-state :char-count (+ (thinking-state :char-count) (length text)))
+  (if (thinking-state :visible)
+    (do
+      (def w (widget/get-widget :chat))
+      (def max-width
+        (if (and w (w :rect))
+          (max 20 (- ((w :rect) :width) 10))
+          72))
+      (each byte text
+        (if (= byte (chr "\n"))
+          (do
+            (def line (string (thinking-state :buf)))
+            (buffer/clear (thinking-state :buf))
+            (if (= "" line)
+              (do (push-line "")
+                  (put (last scrollback) :row-style :thinking-row-bg))
+              (do
+                (def wrapped (word-wrap line max-width))
+                (each wl wrapped
+                  (push-line (string "         " wl))
+                  (put (last scrollback) :row-style :thinking-row-bg)))))
+          nil))
+      (widget/mark-dirty :chat))
+    (spinner-start (string "thinking (" (format-char-count (thinking-state :char-count)) " chars)…"))))
+
+(defn- thinking-end-block []
+  "Push the buffered thinking content as a collapsed block in scrollback."
+  (when (thinking-state :active)
+    (def content (string (thinking-state :buf)))
+    (def char-count (thinking-state :char-count))
+    (when (> char-count 0)
+      (if (thinking-state :visible)
+        (push-line "")
+        (do
+          (def summary (string "   think: (" (format-char-count char-count) " chars) — ctrl+t to expand"))
+          (push-raw-line
+            @[@{:text summary :style (colors :thinking-label)}])
+          (put (last scrollback) :row-style :thinking-row-bg)
+          (put (last scrollback) :thinking-content content))))
+    (buffer/clear (thinking-state :buf))
+    (put thinking-state :active false)
+    (put thinking-state :char-count 0)))
+
+(defn toggle-thinking-visibility []
+  "Toggle between showing/hiding thinking content."
+  (put thinking-state :visible (not (thinking-state :visible)))
+  (def visible (thinking-state :visible))
+  (def w (widget/get-widget :chat))
+  (def max-width
+    (if (and w (w :rect))
+      (max 20 (- ((w :rect) :width) 10))
+      72))
+  (var i 0)
+  (while (< i (length scrollback))
+    (def line (get scrollback i))
+    (def content (get line :thinking-content))
+    (when (and content (not= "" content))
+      (if visible
+        (do
+          (put line :spans nil)
+          (put line :text nil)
+          (put line :_cached-width nil)
+          (put line :_cached-rows nil)
+          (def parts (string/split "\n" content))
+          (def expanded @[])
+          (var first-part true)
+          (each part parts
+            (if (= "" part)
+              (array/push expanded @{:text "" :style (tui/style) :row-style :thinking-row-bg})
+              (do
+                (def wrapped (word-wrap part max-width))
+                (each wl wrapped
+                  (if first-part
+                    (do
+                      (array/push expanded
+                        @{:spans @[@{:text "   think: " :style (colors :thinking-label)}
+                                   @{:text wl :style (colors :thinking-label)}]
+                          :row-style :thinking-row-bg})
+                      (set first-part false))
+                    (array/push expanded
+                      @{:text (string "          " wl) :style (colors :thinking-label)
+                        :row-style :thinking-row-bg}))))))
+          (when (> (length expanded) 0)
+            (def first-expanded (get expanded 0))
+            (eachp [k v] first-expanded (put line k v))
+            (put line :thinking-content content)
+            (put line :_cached-width nil)
+            (put line :_cached-rows nil)
+            (for j 1 (length expanded)
+              (def exp-line (get expanded j))
+              (put exp-line :thinking-content "")
+              (array/insert scrollback (+ i j) exp-line))
+            (set i (+ i (length expanded)))))
+        (do
+          (var end (+ i 1))
+          (while (and (< end (length scrollback))
+                      (not (nil? (get-in scrollback [end :thinking-content]))))
+            (++ end))
+          (when (> (- end i) 1)
+            (array/remove scrollback (+ i 1) (- end i 1)))
+          (def summary (string "   think: (" (format-char-count (length content)) " chars) — ctrl+t to expand"))
+          (put line :spans @[@{:text summary :style (colors :thinking-label)}])
+          (put line :text nil)
+          (put line :row-style :thinking-row-bg)
+          (put line :_cached-width nil)
+          (put line :_cached-rows nil))))
+    (++ i))
+  (widget/mark-dirty :chat)
+  visible)
+
 # ── Core helpers ───────────────────────────────────────────────
 
 (defn- build-effective-prompt []
@@ -653,8 +869,11 @@
       conversation
       (tools/definitions)
       @{:on-text (fn [text]
+          (when (thinking-state :active) (thinking-end-block))
           (when (spinner-active?) (spinner-stop))
           (stream-delta text))
+        :on-thinking (fn [text]
+          (thinking-delta text))
         :on-error (fn [err]
           (spinner-stop)
           (output-error (string "Stream error: " err))
@@ -935,73 +1154,6 @@
 
 # ── Rendering ──────────────────────────────────────────────────
 
-(defn- line-to-visual-rows
-  "Convert a scrollback line into an array of visual rows.
-   Each visual row is an array of {:text :style} spans that fit within width.
-   Lines that exceed width wrap to additional rows."
-  [line width]
-  (def rows @[])
-  (var current-row @[])
-  (var col 0)
-
-  (defn- flush-row []
-    (when (> (length current-row) 0)
-      (array/push rows (array/slice current-row))
-      (array/clear current-row)
-      (set col 0)))
-
-  (defn- add-text-chars [text style]
-    (var ci 0)
-    (while (< ci (length text))
-      (when (>= col width)
-        (flush-row))
-      (def byte (get text ci))
-      (def char-len
-        (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
-      (def cend (min (+ ci char-len) (length text)))
-      (def ch (string/slice text ci cend))
-      (array/push current-row @{:text ch :style style})
-      (++ col)
-      (set ci cend)))
-
-  (if (line :spans)
-    (each span (line :spans)
-      (def text (span :text))
-      (def st (or (span :style) (tui/style)))
-      (add-text-chars text st))
-    (do
-      (def text (or (line :text) ""))
-      (def st (or (line :style) (tui/style)))
-      (add-text-chars text st)))
-
-  # Flush any remaining content
-  (when (> (length current-row) 0)
-    (array/push rows (array/slice current-row)))
-
-  # Empty line still takes one visual row
-  (when (= 0 (length rows))
-    (array/push rows @[]))
-
-  rows)
-
-(defn- line-to-visual-rows-cached
-  "Like line-to-visual-rows but caches results on the scrollback entry.
-   Cache hit when width matches :_cached-width."
-  [line width]
-  (if (and (= (get line :_cached-width) width) (get line :_cached-rows))
-    (line :_cached-rows)
-    (do
-      (def rows (line-to-visual-rows line width))
-      (when (table? line)
-        (put line :_cached-width width)
-        (put line :_cached-rows rows))
-      rows)))
-
-(defn- count-visual-rows
-  "Count how many visual rows a scrollback line occupies at given width."
-  [line width]
-  (length (line-to-visual-rows-cached line width)))
-
 (defn- render-scrollback
   "Render the visible window of scrollback into a tui/buffer.
    Lines that exceed the viewport width wrap to the next visual row."
@@ -1010,19 +1162,39 @@
   (def width (rect :width))
   (def total (length scrollback))
 
-  # Leave room for spinner at bottom if active
-  (def has-partial (and (stream-state :active) (> (length (stream-state :line-buf)) 0)))
-  (def reserved-bottom (+ (if (spinner-active?) 1 0) (if has-partial 1 0)))
+  # Leave room for spinner and partial line at bottom if active and at bottom
+  (def has-partial (and (stream-state :active) (> (length (stream-state :line-buf)) 0) (= scroll-offset 0)))
+  (def has-spinner (and (spinner-active?) (= scroll-offset 0)))
+  (def reserved-bottom (+ (if has-spinner 1 0) (if has-partial 1 0)))
   (def render-height (- height reserved-bottom))
 
   # Build visual rows from the bottom up until we fill the viewport.
-  # We walk backwards from (total - scroll-offset) and expand each
-  # scrollback line into its wrapped visual rows.
+  # scroll-offset counts visual rows to skip from the bottom.
   # Each entry is [cells row-style-key] where row-style-key is a keyword or nil.
-  (def end-idx (max 0 (- total scroll-offset)))
   (def visual-rows @[])
+  (var line-idx (- total 1))
+  (var skip-rows scroll-offset)
 
-  (var line-idx (- end-idx 1))
+  # Phase 1: Skip scroll-offset visual rows from the bottom
+  (while (and (>= line-idx 0) (> skip-rows 0))
+    (def line (get scrollback line-idx))
+    (def rows (line-to-visual-rows-cached line width))
+    (def n-rows (length rows))
+    (if (<= n-rows skip-rows)
+      (do (set skip-rows (- skip-rows n-rows))
+          (-- line-idx))
+      (do
+        # Partial skip: show only the top part of this line
+        (def visible-rows (- n-rows skip-rows))
+        (set skip-rows 0)
+        (def rs (line :row-style))
+        (var ri (- visible-rows 1))
+        (while (and (>= ri 0) (< (length visual-rows) render-height))
+          (array/push visual-rows [(get rows ri) rs])
+          (-- ri))
+        (-- line-idx))))
+
+  # Phase 2: Collect visual rows for the viewport
   (while (and (>= line-idx 0) (< (length visual-rows) render-height))
     (def line (get scrollback line-idx))
     (def rows (line-to-visual-rows-cached line width))
@@ -1054,6 +1226,7 @@
         (cond
           (= rs :user-row-bg) (colors :user-label)
           (= rs :agent-row-bg) (colors :agent-label)
+          (= rs :thinking-row-bg) (colors :thinking-label)
           (colors :tool-label)))
       (tui/buffer-set-char buf (rect :x) y "▐" gutter-color)))
 
@@ -1074,8 +1247,8 @@
           (def style (tui/style))
           (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "        " partial-text) style)))))
 
-  # Render spinner on last row if active
-  (when (spinner-active?)
+  # Render spinner on last row if active (only when at bottom of conversation)
+  (when (and (spinner-active?) (= scroll-offset 0))
     (def frame (get spinner-frames (spinner-state :frame)))
     (def msg (spinner-state :message))
     (def y (+ (rect :y) (- height 1)))
@@ -1100,10 +1273,10 @@
         (= etype :submit) (submit (event :text))
         (= etype :stop) (stop)
         (= etype :scroll-up)
-        (let [total (length scrollback)
+        (let [width (if (self :rect) ((self :rect) :width) 80)
               height (if (self :rect) ((self :rect) :height) 10)
               page-size (max 1 (- height 2))
-              max-offset (max 0 (- total height))]
+              max-offset (max 0 (- (total-visual-rows width) height))]
           (set scroll-offset (min max-offset (+ scroll-offset page-size)))
           (widget/mark-dirty :chat))
         (= etype :scroll-down)
@@ -1112,10 +1285,10 @@
           (set scroll-offset (max 0 (- scroll-offset page-size)))
           (widget/mark-dirty :chat))
         (= etype :scroll-line-up)
-        (let [total (length scrollback)
+        (let [width (if (self :rect) ((self :rect) :width) 80)
               height (if (self :rect) ((self :rect) :height) 10)
               n (or (get event :lines) 1)
-              max-offset (max 0 (- total height))
+              max-offset (max 0 (- (total-visual-rows width) height))
               old-offset scroll-offset]
           (set scroll-offset (min max-offset (+ scroll-offset n)))
           (widget/mark-dirty :chat)
@@ -1127,7 +1300,11 @@
           (set scroll-offset (max 0 (- scroll-offset n)))
           (widget/mark-dirty :chat)
           (def actual (- old-offset scroll-offset))
-          (when (> actual 0) [:scroll-optimized actual :down]))))
+          (when (> actual 0) [:scroll-optimized actual :down]))
+        (= etype :toggle-thinking)
+        (do
+          (def visible (toggle-thinking-visibility))
+          (output-info (string "Thinking blocks: " (if visible "visible" "hidden"))))))
 
     :update (fn [self] (tick))
 
