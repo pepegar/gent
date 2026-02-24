@@ -8,6 +8,13 @@
 #   Tab -> accept -> insert text + styled span
 #   Up/Down -> navigate selection
 #   Escape -> dismiss
+#
+# Fuzzy Matching (zf-style, lower score = better):
+#   Multi-start subsequence matching adapted from natecraddock/zf.
+#   - Tries every occurrence of the first query char, keeps best alignment
+#   - Word boundaries (/ _ - . space) reduce penalties
+#   - Consecutive matches are cheap (first +1.0, rest free)
+#   - Gaps penalized by distance + 2.0 if not at a word boundary
 
 (import core/commands :as commands)
 (import core/skills :as skills)
@@ -63,44 +70,155 @@
   (set file-cache nil)
   (set file-cache-time 0))
 
+# ── Fuzzy matching (zf-style) ──────────────────────────────
+#
+# Scoring algorithm adapted from natecraddock/zf.
+# Lower score = better match. Key properties:
+#   - Multi-start: tries every occurrence of the first char, keeps best
+#   - Word boundaries (/ _ - . space) avoid penalties
+#   - Consecutive chars are cheap: first in a run costs 1.0, rest are free
+#   - Gaps penalized by distance + 2.0 if not at a word boundary
+
+(defn- word-boundary? [byte]
+  (case byte
+    (chr "/") true
+    (chr "_") true
+    (chr "-") true
+    (chr ".") true
+    (chr " ") true
+    false))
+
+(defn- scan-to-end
+  "Try to match remaining token chars left-to-right from start-idx.
+   Returns {:rank <float> :matches [...]} or nil. Lower rank = better."
+  [str token start-idx]
+  (var rank 1.0)
+  (def matches @[start-idx])
+
+  (when (and (> start-idx 0)
+             (not (word-boundary? (get str (- start-idx 1)))))
+    (+= rank 2.0))
+
+  (var last-idx start-idx)
+  (var last-sequential false)
+  (var failed false)
+
+  (for i 0 (length token)
+    (def ch (get token i))
+    (var found-idx nil)
+    (for j (+ last-idx 1) (length str)
+      (when (= ch (get str j))
+        (set found-idx j)
+        (break)))
+    (when (nil? found-idx)
+      (set failed true)
+      (break))
+
+    (if (= found-idx (+ last-idx 1))
+      (do
+        (when (not last-sequential)
+          (set last-sequential true)
+          (+= rank 1.0)))
+      (do
+        (set last-sequential false)
+        (when (not (word-boundary? (get str (- found-idx 1))))
+          (+= rank 2.0))
+        (+= rank (- found-idx last-idx))))
+
+    (array/push matches found-idx)
+    (set last-idx found-idx))
+
+  (if failed nil {:rank rank :matches matches}))
+
+(defn- fuzzy-score
+  "Calculate fuzzy match score for target against query.
+   Returns {:score <number> :matches [pos1 pos2 ...]} or nil if no match.
+   Lower score is better (like zf)."
+  [target query]
+  (when (empty? target) (break nil))
+  (when (empty? query) (break {:score math/inf :matches @[]}))
+
+  (def ltarget (string/ascii-lower target))
+  (def lquery (string/ascii-lower query))
+  (def first-char (get lquery 0))
+  (def rest-query (string/slice lquery 1))
+
+  (var best nil)
+
+  (for i 0 (length ltarget)
+    (when (= (get ltarget i) first-char)
+      (def result (scan-to-end ltarget rest-query i))
+      (when result
+        (when (or (nil? best) (< (result :rank) (best :rank)))
+          (set best result)))))
+
+  (when (nil? best) (break nil))
+  {:score (best :rank) :matches (best :matches)})
+
+(defn- make-candidate
+  "Create a candidate with fuzzy score."
+  [label detail insert target query]
+  (def score (fuzzy-score target query))
+  (when score
+    {:label label
+     :detail detail
+     :insert insert
+     :fuzzy-score score}))
+
+(defn- sort-candidates-by-score
+  "Sort candidates by fuzzy score (lowest first — lower is better)."
+  [candidates]
+  (sort-by |(get-in $ [:fuzzy-score :score] math/inf) candidates))
+
 # ── Source: Commands ─────────────────────────────────────────
 
 (defn- command-candidates [pfx]
   (def cmds (commands/list-commands))
-  (def lp (string/ascii-lower pfx))
-  (seq [[name desc] :in cmds
-        :when (string/has-prefix? lp (string/ascii-lower name))]
-    {:label (string "/" name)
-     :detail desc
-     :insert (string "/" name " ")}))
+  (def results @[])
+  
+  (each [name desc] cmds
+    (def candidate (make-candidate (string "/" name) 
+                                  desc 
+                                  (string "/" name " ")
+                                  name 
+                                  pfx))
+    (when candidate
+      (array/push results candidate)))
+  
+  (sort-candidates-by-score results))
 
 # ── Source: Skills ───────────────────────────────────────────
 
 (defn- skill-candidates [pfx]
   (def skill-list (skills/list-skills))
-  (def lp (string/ascii-lower pfx))
-  (seq [s :in skill-list
-        :when (string/has-prefix? lp (string/ascii-lower (s :name)))]
-    {:label (s :name)
-     :detail (s :description)
-     :insert (string "/skill:" (s :name) " ")}))
+  (def results @[])
+  
+  (each s skill-list
+    (def candidate (make-candidate (s :name)
+                                  (s :description)
+                                  (string "/skill:" (s :name) " ")
+                                  (s :name)
+                                  pfx))
+    (when candidate
+      (array/push results candidate)))
+  
+  (sort-candidates-by-score results))
 
 # ── Source: Files ────────────────────────────────────────────
 
 (defn- file-candidates [pfx]
   (def files (get-file-list))
   (when (nil? files) (break @[]))
-  (def lp (string/ascii-lower pfx))
   (def results @[])
+  
   (each f files
-    (when (string/has-prefix? lp (string/ascii-lower f))
-      (array/push results
-        {:label f
-         :detail ""
-         :insert (string "@" f)}))
+    (def candidate (make-candidate f "" (string "@" f) f pfx))
+    (when candidate
+      (array/push results candidate))
     (when (>= (length results) 50)
       (break)))
-  results)
+  
+  (sort-candidates-by-score results))
 
 # ── Source: Commits ──────────────────────────────────────────
 
@@ -128,7 +246,6 @@
 (defn- commit-candidates [pfx]
   (def commits (get-commit-list))
   (when (nil? commits) (break @[]))
-  (def lp (string/ascii-lower pfx))
   (def results @[])
   
   (each commit commits
@@ -136,16 +253,17 @@
     (when (>= (length parts) 2)
       (def hash (get parts 0))
       (def message (get parts 1))
-      # Match on hash prefix or message content
-      (when (or (string/has-prefix? lp (string/ascii-lower hash))
-                (string/find lp (string/ascii-lower message)))
-        (array/push results
-          {:label hash
-           :detail message
-           :insert hash})))
+      # Try fuzzy matching on hash first, then message
+      (def hash-candidate (make-candidate hash message hash hash pfx))
+      (def message-candidate (make-candidate hash message hash message pfx))
+      (def candidate (or hash-candidate message-candidate))
+      
+      (when candidate
+        (array/push results candidate)))
     (when (>= (length results) 30)
       (break)))
-  results)
+  
+  (sort-candidates-by-score results))
 
 (defn refresh-commit-cache []
   (set commit-cache nil)
@@ -290,8 +408,10 @@
   [pt]
   (when (not= state :active) (break nil))
   (when (empty? candidates) (break nil))
+  (when (>= selected (length candidates)) (break nil))
   (def candidate (get candidates selected))
-  (def result {:insert (candidate :insert)
+  (when (nil? candidate) (break nil))
+  (def result {:insert (get candidate :insert "")
                :start trigger-start
                :end pt})
   (dismiss)
@@ -319,8 +439,9 @@
   (var max-detail 0)
   (for i start-idx end-idx
     (def c (get candidates i))
-    (set max-label (max max-label (length (c :label))))
-    (set max-detail (max max-detail (length (c :detail)))))
+    (when c  # Only process if candidate exists
+      (set max-label (max max-label (length (get c :label ""))))
+      (set max-detail (max max-detail (length (get c :detail ""))))))
 
   (def inner-width (min (+ max-label 2 max-detail 2) (- max-popup-width 2)))
   (def popup-width (+ inner-width 2))
@@ -350,14 +471,15 @@
     
     (def y (+ popup-y 1 row))
     (def c (get candidates candidate-idx))
+    (when (nil? c) (break))  # Skip if no candidate at this index
     (def is-selected (= candidate-idx selected))
     (def row-style (if is-selected selected-style normal-style))
     (def indicator (if is-selected ">" " "))
 
     (array/push cells {:x popup-x :y y :ch "\xE2\x94\x82" :style border-style})
 
-    (def label-str (c :label))
-    (def detail-str (c :detail))
+    (def label-str (get c :label ""))
+    (def detail-str (get c :detail ""))
     (def padded-label (string indicator label-str))
     (def content-str
       (if (> (length detail-str) 0)
