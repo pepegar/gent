@@ -109,35 +109,9 @@
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w r small-buf)))
             (put w :dirty false)
-            # Diff this rect between prev-buf and small-buf, emit changes
-            (def parts @[])
-            (var cur-style nil)
-            (var expected-col nil)
-            (for row 0 (r :height)
-              (def y (+ (r :y) row))
-              (set expected-col nil)
-              (for col 0 (r :width)
-                (def x (+ (r :x) col))
-                (def old-c (tui/buffer-get prev-buf x y))
-                (def new-c (tui/buffer-get small-buf x y))
-                (unless (and (= (old-c :ch) (new-c :ch))
-                             (tui/style= (old-c :style) (new-c :style)))
-                  (when (or (nil? expected-col) (not= col expected-col))
-                    (array/push parts
-                      (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
-                  (def st (new-c :style))
-                  (when (not (tui/style= st cur-style))
-                    (array/push parts "\x1b[0m")
-                    (def sgr (tui/style->sgr st))
-                    (when (not= sgr "") (array/push parts sgr))
-                    (set cur-style st))
-                  (array/push parts (new-c :ch))
-                  (set expected-col (+ col 1))
-                  # Update prev-buf in place
-                  (tui/buffer-set-char prev-buf x y (new-c :ch) (new-c :style)))))
-            (when (not (empty? parts))
-              (array/push parts "\x1b[0m")
-              (term/write (string ;parts))))))))
+            # Diff this rect between prev-buf and small-buf via native Rust
+            (def diff-str (buffer/diff prev-buf small-buf r))
+            (when (not= "" diff-str) (term/write diff-str)))))))
 
   # Render completion popup overlay (if active)
   (when (and prev-buf screen-area (completion/active?))

@@ -148,6 +148,42 @@
     (process-handler cmd args)
     @{:stdout "" :stderr "" :status 0}))
 
+# ── Buffer diff mock ──────────────────────────────────────────
+
+(defn- mock-buffer-diff [old-buf new-buf r]
+  (def tui (require "tui"))
+  (def buffer-get (get-in tui ['buffer-get :value]))
+  (def style= (get-in tui ['style= :value]))
+  (def style->sgr (get-in tui ['style->sgr :value]))
+  (def buffer-set-char (get-in tui ['buffer-set-char :value]))
+  (def parts @[])
+  (var cur-style nil)
+  (var expected-col nil)
+  (for row 0 (r :height)
+    (def y (+ (r :y) row))
+    (set expected-col nil)
+    (for col 0 (r :width)
+      (def x (+ (r :x) col))
+      (def old-c (buffer-get old-buf x y))
+      (def new-c (buffer-get new-buf x y))
+      (unless (and (= (old-c :ch) (new-c :ch))
+                   (style= (old-c :style) (new-c :style)))
+        (when (or (nil? expected-col) (not= col expected-col))
+          (array/push parts
+            (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
+        (def st (new-c :style))
+        (when (not (style= st cur-style))
+          (array/push parts "\x1b[0m")
+          (def sgr (style->sgr st))
+          (when (not= sgr "") (array/push parts sgr))
+          (set cur-style st))
+        (array/push parts (new-c :ch))
+        (set expected-col (+ col 1))
+        (buffer-set-char old-buf x y (new-c :ch) (new-c :style)))))
+  (when (not (empty? parts))
+    (array/push parts "\x1b[0m"))
+  (string ;parts))
+
 # ── Install ────────────────────────────────────────────────────
 
 (defn install
@@ -169,4 +205,5 @@
   (install-mock env "term/read-event" mock-term-read-event)
   (install-mock env "term/suspend" mock-term-suspend)
   (install-mock env "process/exec" mock-process-exec)
+  (install-mock env "buffer/diff" mock-buffer-diff)
   nil)
