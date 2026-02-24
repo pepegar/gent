@@ -60,6 +60,69 @@
 (var- prev-buf nil)
 (var- screen-area nil)
 (var- popup-was-visible false)
+(var- pending-scroll-opt nil)
+
+(defn- scroll-region-optimize
+  "Apply terminal scroll region optimization for the chat widget.
+   Shifts terminal content and prev-buf cells so only N new rows need diffing."
+  [delta direction]
+  (when (nil? prev-buf) (break false))
+  (when popup-was-visible (break false))
+  (when (completion/active?) (break false))
+
+  (def chat-w (widget/get-widget :chat))
+  (when (nil? chat-w) (break false))
+  (def cr (chat-w :rect))
+  (when (nil? cr) (break false))
+
+  (def rh (cr :height))
+  (when (> delta (math/floor (/ rh 2))) (break false))
+
+  (def ry (cr :y))
+  (def rx (cr :x))
+  (def rw (cr :width))
+  (def cells (prev-buf :cells))
+  (def pa (prev-buf :area))
+  (def pw (pa :width))
+
+  # Terminal scroll region escape sequences
+  (def top (+ ry 1))
+  (def bottom (+ ry rh))
+  (term/write (string/format "\x1b[%d;%dr" top bottom))
+  (if (= direction :up)
+    (term/write (string/format "\x1b[%dT" delta))
+    (term/write (string/format "\x1b[%dS" delta)))
+  (term/write "\x1b[r")
+
+  # Shift prev-buf cells within the chat rect
+  (if (= direction :up)
+    (do
+      # Content moves DOWN: shift rows down, new content at top
+      (var row (- rh 1))
+      (while (>= row delta)
+        (for col 0 rw
+          (def src-idx (+ (* (+ ry (- row delta)) pw) rx col))
+          (def dst-idx (+ (* (+ ry row) pw) rx col))
+          (put cells dst-idx (get cells src-idx)))
+        (-- row))
+      (for row 0 delta
+        (for col 0 rw
+          (def idx (+ (* (+ ry row) pw) rx col))
+          (put cells idx @{:ch " " :style tui/style-default}))))
+    (do
+      # Content moves UP: shift rows up, new content at bottom
+      (for row 0 (- rh delta)
+        (for col 0 rw
+          (def src-idx (+ (* (+ ry (+ row delta)) pw) rx col))
+          (def dst-idx (+ (* (+ ry row) pw) rx col))
+          (put cells dst-idx (get cells src-idx))))
+      (for row (- rh delta) rh
+        (for col 0 rw
+          (def idx (+ (* (+ ry row) pw) rx col))
+          (put cells idx @{:ch " " :style tui/style-default})))))
+
+  (set pending-scroll-opt {:delta delta :direction direction :height rh})
+  true)
 
 (defn- refresh-and-layout
   "Refresh terminal size, do widget layout, sync, create buffers."
@@ -83,11 +146,13 @@
   (when popup-was-visible
     (widget/mark-dirty :chat)
     (widget/mark-dirty :separator)
-    (set popup-was-visible false))
+    (set popup-was-visible false)
+    (set pending-scroll-opt nil))
 
   (if (nil? prev-buf)
     # First frame or after resize — full render
     (do
+      (set pending-scroll-opt nil)
       (def buf (tui/buffer screen-area))
       (each name (widget/list-widgets)
         (when-let [w (widget/get-widget name)]
@@ -104,12 +169,20 @@
         (when-let [w (widget/get-widget name)]
           (when (and (w :dirty) (w :rect) (w :render))
             (def r (w :rect))
-            # Render into a small buffer covering just this widget's rect
             (def small-buf (tui/buffer r true))
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w r small-buf)))
             (put w :dirty false)
-            # Diff this rect between prev-buf and small-buf via native Rust
+            # After scroll-region-optimize, only the N new rows need diffing
+            (when (and pending-scroll-opt (= name :chat))
+              (def info pending-scroll-opt)
+              (set pending-scroll-opt nil)
+              (when-let [dr (small-buf :dirty-rows)]
+                (for i 0 (length dr) (put dr i false))
+                (def delta (info :delta))
+                (if (= (info :direction) :up)
+                  (for i 0 (min delta (length dr)) (put dr i true))
+                  (for i (max 0 (- (length dr) delta)) (length dr) (put dr i true)))))
             (def diff-str (buffer/diff prev-buf small-buf r))
             (when (not= "" diff-str) (term/write diff-str)))))))
 
@@ -278,14 +351,16 @@
             (while (and next (= :scroll (get next :type)))
               (if (= :up (get next :direction)) (++ scroll-delta) (-- scroll-delta))
               (set next (term/read-event 0)))
+            (var scroll-result nil)
             (profile/with-span-meta "event:scroll" "event"
               @{:coalesced (math/abs scroll-delta)}
               (fn []
-                # Apply the accumulated delta as a single dispatch
                 (when (> scroll-delta 0)
-                  (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta}))
+                  (set scroll-result (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta})))
                 (when (< scroll-delta 0)
-                  (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)}))))
+                  (set scroll-result (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)})))))
+            (when (and scroll-result (tuple? scroll-result) (= :scroll-optimized (first scroll-result)))
+              (scroll-region-optimize (get scroll-result 1) (get scroll-result 2)))
             # If we read a non-scroll event, handle it next iteration
             # by pushing it back — but term has no pushback, so handle inline
             (when next
@@ -360,10 +435,14 @@
               (widget/dispatch :chat {:type :scroll-down})
 
               (= result :scroll-line-up)
-              (widget/dispatch :chat {:type :scroll-line-up})
+              (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
+                (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                  (scroll-region-optimize (get sr 1) (get sr 2))))
 
               (= result :scroll-line-down)
-              (widget/dispatch :chat {:type :scroll-line-down})
+              (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
+                (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                  (scroll-region-optimize (get sr 1) (get sr 2))))
 
               (= result :rerender)
               (force-rerender))))))

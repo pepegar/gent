@@ -1085,14 +1085,19 @@
         (let [total (length scrollback)
               height (if (self :rect) ((self :rect) :height) 10)
               n (or (get event :lines) 1)
-              max-offset (max 0 (- total height))]
+              max-offset (max 0 (- total height))
+              old-offset scroll-offset]
           (set scroll-offset (min max-offset (+ scroll-offset n)))
-          (widget/mark-dirty :chat))
+          (widget/mark-dirty :chat)
+          (def actual (- scroll-offset old-offset))
+          (when (> actual 0) [:scroll-optimized actual :up]))
         (= etype :scroll-line-down)
-        (do
-          (def n (or (get event :lines) 1))
+        (let [n (or (get event :lines) 1)
+              old-offset scroll-offset]
           (set scroll-offset (max 0 (- scroll-offset n)))
-          (widget/mark-dirty :chat))))
+          (widget/mark-dirty :chat)
+          (def actual (- old-offset scroll-offset))
+          (when (> actual 0) [:scroll-optimized actual :down]))))
 
     :update (fn [self] (tick))
 

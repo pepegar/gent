@@ -199,6 +199,23 @@ During scroll, all rows change, so dirty tracking adds slight overhead (~0.3ms) 
 
 **Expected impact**: Scroll rendering drops to O(width × N) where N = 1-3 new lines.
 
+### Phase 4 Measured Results (tui-wright, 100×30, scroll test)
+
+```
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+render:frame               102      409.4       4.0       0.5       6.2
+render:chat                101      336.3       3.3       2.4       5.6
+event:scroll               100        1.1       0.0       0.0       0.0
+
+Diff cost (frame - chat):  ~0.7ms avg  (was 2.4ms → 71% reduction)
+render:frame avg:           4.0ms      (was 5.2ms → 23% improvement)
+render:chat avg:            3.3ms      (still the dominant cost)
+Effective FPS:              ~68fps     (was ~52fps)
+Cumulative from baseline:   12.6ms → 4.0ms  (68% total reduction)
+```
+
+Terminal scroll regions + dirty-row override work together: the terminal shifts content natively, prev-buf cells are shifted to match, and the Rust diff only processes the N newly-visible rows (dirty-rows flags overridden after chat render). The diff cost dropped from 2.4ms to 0.7ms. The remaining bottleneck is render:chat (3.3ms) — the full chat widget render into the small-buf. Phase 5 (visual row caching) targets this cost.
+
 ---
 
 ## Bonus: Visual Row Caching
