@@ -57,7 +57,7 @@
   (t/assert-truthy (line :spans))
   # First span is the label, second is the text
   (t/assert= (length (line :spans)) 2)
-  (t/assert-truthy (string/find "you" ((first (line :spans)) :text)))
+  (t/assert-truthy (string/find "user:" ((first (line :spans)) :text)))
   (t/assert-truthy (string/find "hi there" ((last (line :spans)) :text)))))
 
 (t/test "output-error pushes error spans" (fn []
@@ -65,7 +65,7 @@
   (chat/output-error "something broke")
   (def line (first (chat/get-scrollback)))
   (t/assert-truthy (line :spans))
-  (t/assert-truthy (string/find "error" ((first (line :spans)) :text)))))
+  (t/assert-truthy (string/find "err:" ((first (line :spans)) :text)))))
 
 (t/test "output-agent word-wraps long lines" (fn []
   (setup)
@@ -236,7 +236,7 @@
   ((w :render) w rect buf)
   # The bottom row should contain "you" label and user text
   (def row-text (read-buffer-row buf 21 80))
-  (t/assert-truthy (string/find "you" row-text))
+  (t/assert-truthy (string/find "user:" row-text))
   (t/assert-truthy (string/find "hello from user" row-text))))
 
 # ── Tool rendering tests ──────────────────────────────────────

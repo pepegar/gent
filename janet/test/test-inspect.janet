@@ -57,7 +57,7 @@
   (chat/output-user "test message")
   (def texts (inspect/scrollback-text))
   (t/assert= (length texts) 1)
-  (t/assert-truthy (string/find "you" (get texts 0)))
+  (t/assert-truthy (string/find "user:" (get texts 0)))
   (t/assert-truthy (string/find "test message" (get texts 0)))))
 
 (t/test "scrollback-text handles error spans" (fn []
@@ -65,7 +65,7 @@
   (chat/output-error "something broke")
   (def texts (inspect/scrollback-text))
   (t/assert= (length texts) 1)
-  (t/assert-truthy (string/find "error" (get texts 0)))
+  (t/assert-truthy (string/find "err:" (get texts 0)))
   (t/assert-truthy (string/find "something broke" (get texts 0)))))
 
 (t/test "scrollback-text handles mixed content" (fn []

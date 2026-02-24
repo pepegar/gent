@@ -341,14 +341,14 @@
 
 (defn output-error [text]
   (push-raw-line
-    @[@{:text " error " :style (colors :error-label)}
-      @{:text (string " " text) :style (tui/style)}]))
+    @[@{:text "   err:  " :style (colors :error-label)}
+      @{:text text :style (tui/style)}]))
 
 (defn output-user [text]
   (when (> (length scrollback) 0) (push-line ""))  # Single blank line
   (push-raw-line
-    @[@{:text " you " :style (colors :user-label)}
-      @{:text (string " " text) :style (tui/style)}])
+    @[@{:text "   user: " :style (colors :user-label)}
+      @{:text text :style (tui/style)}])
   (put (last scrollback) :row-style :user-row-bg))
 
 (defn output-agent [lines]
@@ -357,7 +357,7 @@
   (def w (widget/get-widget :chat))
   (def max-width
     (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 8))
+      (max 20 (- ((w :rect) :width) 10))
       72))
   (def parts (string/split "\n" lines))
   (var first true)
@@ -371,16 +371,16 @@
           (if first
             (do
               (push-raw-line
-                @[@{:text " gent " :style (colors :agent-label)}
-                  @{:text (string " " wl) :style (tui/style)}])
+                @[@{:text "   gent: " :style (colors :agent-label)}
+                  @{:text wl :style (tui/style)}])
               (set first false))
-            (push-line (string "       " wl)))
+            (push-line (string "         " wl)))
           (put (last scrollback) :row-style :agent-row-bg)))))
   (push-line ""))
 
 (defn output-tool [name &opt detail]
   (push-raw-line
-    @[@{:text (string "  ▸ " name) :style (colors :tool-label)}
+    @[@{:text (string "   ▸ " name) :style (colors :tool-label)}
       @{:text (if detail (string " " detail) "") :style (colors :separator)}])
   (put (last scrollback) :row-style :tool-row-bg))
 
@@ -402,7 +402,7 @@
     (def linenum (string/format (string "%" num-width "d") (+ i 1)))
     (def code-line (get trimmed i ""))
     (push-raw-line
-      @[@{:text (string "    " linenum " ") :style (colors :eval-linenum)}
+      @[@{:text (string "         " linenum " ") :style (colors :eval-linenum)}
         @{:text "│" :style (colors :eval-border)}
         @{:text (string " " code-line) :style (colors :eval-code)}])
     (put (last scrollback) :row-style :tool-row-bg)))
@@ -417,11 +417,11 @@
 
   (if is-create
     (push-raw-line
-      @[@{:text "  ▸ edit_file" :style (colors :tool-label)}
+      @[@{:text "   ▸ edit_file" :style (colors :tool-label)}
         @{:text (string " " path " ") :style (colors :separator)}
         @{:text "(new file)" :style (colors :tool-label)}])
     (push-raw-line
-      @[@{:text "  ▸ edit_file" :style (colors :tool-label)}
+      @[@{:text "   ▸ edit_file" :style (colors :tool-label)}
         @{:text (string " " path) :style (colors :separator)}]))
   (put (last scrollback) :row-style :tool-row-bg)
 
@@ -429,20 +429,20 @@
     (def old-lines (string/split "\n" old-str))
     (def show-n (min (length old-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "    - " (get old-lines i "")) (colors :diff-red-fg))
+      (push-line (string "         - " (get old-lines i "")) (colors :diff-red-fg))
       (put (last scrollback) :row-style :tool-row-bg))
     (when (> (length old-lines) max-diff-lines)
-      (push-line (string "      … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator))
+      (push-line (string "         … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator))
       (put (last scrollback) :row-style :tool-row-bg)))
 
   (when (not= "" new-str)
     (def new-lines (string/split "\n" new-str))
     (def show-n (min (length new-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "    + " (get new-lines i "")) (colors :diff-green-fg))
+      (push-line (string "         + " (get new-lines i "")) (colors :diff-green-fg))
       (put (last scrollback) :row-style :tool-success-bg))
     (when (> (length new-lines) max-diff-lines)
-      (push-line (string "      … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator))
+      (push-line (string "         … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator))
       (put (last scrollback) :row-style :tool-success-bg))))
 
 (var- tool-result-max-lines 10)
@@ -458,10 +458,10 @@
   (def show-lines (min total tool-result-max-lines))
   (for i 0 show-lines
     (def line (get lines i ""))
-    (push-line (string "    " line) (colors :separator))
+    (push-line (string "         " line) (colors :separator))
     (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
-    (push-line (string "    … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
     (put (last scrollback) :row-style row-bg)))
 
 # ── Pluggable tool renderers ──────────────────────────────────
@@ -502,12 +502,12 @@
 (defn output-eval [code result]
   "Display an inline Janet eval."
   (push-raw-line
-    @[@{:text " eval " :style (colors :tool-label)}
-      @{:text (string " " code) :style (colors :separator)}])
+    @[@{:text "   eval: " :style (colors :tool-label)}
+      @{:text code :style (colors :separator)}])
   (when (and result (not= "" result))
     (each line (string/split "\n" result)
       (push-raw-line
-        @[@{:text "    => " :style (colors :tool-label)}
+        @[@{:text "      => " :style (colors :tool-label)}
           @{:text line :style (tui/style)}]))))
 
 # ── Streaming output ──────────────────────────────────────────
@@ -525,7 +525,7 @@
   (def w (widget/get-widget :chat))
   (def max-width
     (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 8))
+      (max 20 (- ((w :rect) :width) 10))
       72))
   (each byte text
     (if (= byte (chr "\n"))
@@ -541,10 +541,10 @@
               (if (stream-state :first)
                 (do
                   (push-raw-line
-                    @[@{:text " gent " :style (colors :agent-label)}
-                      @{:text (string " " wl) :style (tui/style)}])
+                    @[@{:text "   gent: " :style (colors :agent-label)}
+                      @{:text wl :style (tui/style)}])
                   (put stream-state :first false))
-                (push-line (string "       " wl)))
+                (push-line (string "         " wl)))
               (put (last scrollback) :row-style :agent-row-bg)))))
       (buffer/push buf byte)))
   (widget/mark-dirty :chat))
@@ -554,7 +554,7 @@
   (def w (widget/get-widget :chat))
   (def max-width
     (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 8))
+      (max 20 (- ((w :rect) :width) 10))
       72))
   (when (> (length buf) 0)
     (def line (string buf))
@@ -563,10 +563,10 @@
       (if (stream-state :first)
         (do
           (push-raw-line
-            @[@{:text " gent " :style (colors :agent-label)}
-              @{:text (string " " wl) :style (tui/style)}])
+            @[@{:text "   gent: " :style (colors :agent-label)}
+              @{:text wl :style (tui/style)}])
           (put stream-state :first false))
-        (push-line (string "       " wl)))
+        (push-line (string "         " wl)))
       (put (last scrollback) :row-style :agent-row-bg)))
   (def had-content (not (stream-state :first)))
   (buffer/clear buf)
@@ -1007,20 +1007,18 @@
   (for i 0 visible-count
     (def [row rs] (get ordered i))
     (def y (+ (rect :y) y-offset i))
-    (def row-bg (when rs (get colors rs)))
-    # Fill the full row with bg color first
-    (when row-bg
-      (for x (rect :x) (+ (rect :x) width)
-        (tui/buffer-set-char buf x y " " row-bg)))
     (var col (rect :x))
     (each cell row
       (when (>= col (+ (rect :x) width)) (break))
-      (def final-style
-        (if (and row-bg (nil? (get (cell :style) :bg)))
-          (tui/style-merge row-bg (cell :style))
-          (cell :style)))
-      (tui/buffer-set-char buf col y (cell :text) final-style)
-      (++ col)))
+      (tui/buffer-set-char buf col y (cell :text) (cell :style))
+      (++ col))
+    (when rs
+      (def gutter-color
+        (cond
+          (= rs :user-row-bg) (colors :user-label)
+          (= rs :agent-row-bg) (colors :agent-label)
+          (colors :tool-label)))
+      (tui/buffer-set-char buf (rect :x) y "▐" gutter-color)))
 
   # Render the in-progress streaming line (partial line not yet newline-terminated)
   (when has-partial
@@ -1028,15 +1026,16 @@
     # Render just below the scrollback content (in the reserved area)
     (def partial-y (+ (rect :y) y-offset visible-count))
     (when (< partial-y (+ (rect :y) height))
+      (tui/buffer-set-char buf (rect :x) partial-y "▐" (colors :agent-label))
       (if (stream-state :first)
         (do
           (def label-style (colors :agent-label))
           (def text-style (tui/style))
-          (tui/buffer-set-string buf (rect :x) partial-y " gent " label-style)
-          (tui/buffer-set-string buf (+ (rect :x) 6) partial-y (string " " partial-text) text-style))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y "  gent: " label-style)
+          (tui/buffer-set-string buf (+ (rect :x) 9) partial-y partial-text text-style))
         (do
           (def style (tui/style))
-          (tui/buffer-set-string buf (rect :x) partial-y (string "       " partial-text) style)))))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "        " partial-text) style)))))
 
   # Render spinner on last row if active
   (when (spinner-active?)

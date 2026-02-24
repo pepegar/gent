@@ -85,7 +85,7 @@
   (chat/output-user "hello agent")
   (def rows (render-chat w))
   (def bottom (get rows 9))
-  (t/assert-truthy (string/find "you" bottom))
+  (t/assert-truthy (string/find "user:" bottom))
   (t/assert-truthy (string/find "hello agent" bottom))))
 
 (t/test "snapshot: error message shows label" (fn []
@@ -93,7 +93,7 @@
   (chat/output-error "something failed")
   (def rows (render-chat w))
   (def bottom (get rows 9))
-  (t/assert-truthy (string/find "error" bottom))
+  (t/assert-truthy (string/find "err:" bottom))
   (t/assert-truthy (string/find "something failed" bottom))))
 
 (t/test "snapshot: tool call shows tool name" (fn []
@@ -141,7 +141,7 @@
 
   # Verify rendered output via buffer snapshot
   (def rows (render-chat w 60 8))
-  (t/assert-truthy (any-row-contains? rows "you"))
+  (t/assert-truthy (any-row-contains? rows "user:"))
   (t/assert-truthy (any-row-contains? rows "bash"))))
 
 # ── Word wrapping snapshot ───────────────────────────────────
@@ -150,7 +150,7 @@
   (def w (setup 30 10))
   (chat/output-agent "This is a long agent response that should wrap across multiple lines in a narrow viewport")
   (def rows (render-chat w 30 10))
-  (t/assert-truthy (any-row-contains? rows "gent"))
+  (t/assert-truthy (any-row-contains? rows "gent:"))
   # Multiple rows should have content (wrapped)
   (def non-empty (filter |(not= "" $) rows))
   (t/assert-truthy (> (length non-empty) 1))))
@@ -242,8 +242,8 @@
     found)
 
   # Verify key content is present
-  (t/assert-truthy (find-row "you"))
-  (t/assert-truthy (find-row "gent"))
+  (t/assert-truthy (find-row "user:"))
+  (t/assert-truthy (find-row "gent:"))
   (t/assert-truthy (find-row "read_file"))
   (t/assert-truthy (find-row "edit_file"))
 
@@ -273,7 +273,7 @@
   # User message should be on bottom row with no blank above it
   # (since it's the first thing in the scrollback)
   (def bottom (get rows 9))
-  (t/assert-truthy (string/find "you" bottom))
+  (t/assert-truthy (string/find "user:" bottom))
   (t/assert-truthy (string/find "hello" bottom))
   # Only 1 scrollback entry, so row 8 should be blank (empty viewport, not spacing)
   (t/assert= (length (chat/get-scrollback)) 1)))
@@ -325,61 +325,62 @@
   ((w :render) w r buf)
   buf)
 
-(t/test "snapshot: user message has row background" (fn []
+(t/test "snapshot: user message has gutter bar" (fn []
   (def w (setup))
   (chat/output-user "hello")
   (def buf (render-buf w))
   (def cell (tui/buffer-get buf 0 9))
-  (t/assert-truthy (get (cell :style) :bg))))
+  (t/assert= (cell :ch) "▐")))
 
-(t/test "snapshot: agent message has row background" (fn []
+(t/test "snapshot: agent message has gutter bar" (fn []
   (def w (setup))
   (chat/output-agent "response text")
   (def buf (render-buf w))
   # Agent text is on row 8; row 9 is the margin-bottom blank line
   (def cell (tui/buffer-get buf 0 8))
-  (t/assert-truthy (get (cell :style) :bg))))
+  (t/assert= (cell :ch) "▐")))
 
-(t/test "snapshot: tool call has row background" (fn []
+(t/test "snapshot: tool call has gutter bar" (fn []
   (def w (setup))
   (chat/output-tool "bash" "ls")
   (def buf (render-buf w))
   (def cell (tui/buffer-get buf 0 9))
-  (t/assert-truthy (get (cell :style) :bg))))
+  (t/assert= (cell :ch) "▐")))
 
-(t/test "snapshot: tool result has row background" (fn []
+(t/test "snapshot: tool result has gutter bar" (fn []
   (def w (setup))
   (chat/output-tool-result "ok")
   (def buf (render-buf w))
   (def cell (tui/buffer-get buf 0 9))
-  (t/assert-truthy (get (cell :style) :bg))))
+  (t/assert= (cell :ch) "▐")))
 
-(t/test "snapshot: tool error result has different bg from success" (fn []
+(t/test "snapshot: tool error and success both have gutter bars" (fn []
   (def w (setup 60 10))
   (chat/output-tool-result "success result" true)
   (chat/output-tool-result "Error: something failed" false)
   (def buf (render-buf w 60 10))
   (def success-cell (tui/buffer-get buf 0 8))
   (def error-cell (tui/buffer-get buf 0 9))
-  (t/assert-truthy (get (success-cell :style) :bg))
-  (t/assert-truthy (get (error-cell :style) :bg))
-  (t/assert-truthy (not (deep= (success-cell :style) (error-cell :style))))))
+  (t/assert= (success-cell :ch) "▐")
+  (t/assert= (error-cell :ch) "▐")))
 
-(t/test "snapshot: row bg fills entire row width" (fn []
+(t/test "snapshot: gutter bar is only at column 0" (fn []
   (def w (setup 40 10))
   (chat/output-user "hi")
   (def buf (render-buf w 40 10))
+  (def cell-start (tui/buffer-get buf 0 9))
   (def cell-end (tui/buffer-get buf 39 9))
-  (t/assert-truthy (get (cell-end :style) :bg))))
+  (t/assert= (cell-start :ch) "▐")
+  (t/assert-truthy (not= (cell-end :ch) "▐"))))
 
 (t/test "snapshot: set-colors overrides a color" (fn []
   (def w (setup))
-  (def custom-bg (tui/style :bg [:rgb 99 99 99]))
-  (chat/set-colors @{:user-row-bg custom-bg})
-  (chat/output-user "custom bg test")
+  (def custom-label (tui/style :fg [:rgb 99 99 99]))
+  (chat/set-colors @{:user-label custom-label})
+  (chat/output-user "custom label test")
   (def buf (render-buf w))
-  (def cell (tui/buffer-get buf 39 9))
-  (t/assert= (get (cell :style) :bg) [:rgb 99 99 99])
+  (def cell (tui/buffer-get buf 0 9))
+  (t/assert= (get (cell :style) :fg) [:rgb 99 99 99])
   (chat/set-theme :dark)))
 
 (t/test "snapshot: set-theme switches to light" (fn []
@@ -387,11 +388,9 @@
   (chat/set-theme :light)
   (chat/output-user "light mode")
   (def buf (render-buf w))
-  (def cell (tui/buffer-get buf 39 9))
-  (def bg (get (cell :style) :bg))
-  (t/assert-truthy bg)
-  # Light theme row bg should have high channel values (>200)
-  (t/assert-truthy (> (get bg 1) 200))
+  (def cell (tui/buffer-get buf 0 9))
+  (t/assert= (cell :ch) "▐")
+  (t/assert-truthy (get (cell :style) :fg))
   (chat/set-theme :dark)))
 
 (t/test "snapshot: set-theme rejects unknown theme" (fn []
@@ -416,8 +415,8 @@
   (chat/auto-theme)
   (chat/output-user "test")
   (def buf2 (render-buf w))
-  (def cell (tui/buffer-get buf2 39 9))
-  (t/assert-truthy (get (cell :style) :bg))
+  (def cell (tui/buffer-get buf2 0 9))
+  (t/assert= (cell :ch) "▐")
   (chat/set-theme :dark)))
 
 (def pass (t/pass))
