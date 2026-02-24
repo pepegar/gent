@@ -31,7 +31,9 @@
    "test/test-chat"
    "test/test-chat-integration"
    "test/test-completion"
-   "test/test-input-history"])
+   "test/test-input-history"
+   "test/test-inspect"
+   "test/test-snapshot"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native
