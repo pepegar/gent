@@ -11,6 +11,7 @@
 (import widgets/editor_new :as ed)
 (import core/completion :as completion)
 (import core/input-history :as ih)
+(import core/widget :as widget)
 (import tui)
 
 (var- editor-state nil)
@@ -39,7 +40,6 @@
       :callback (get opts :callback (fn [_] nil))
       :saved-text (ed/text editor-state)})
   (ed/set-text editor-state "")
-  (import core/widget :as widget)
   (widget/mark-dirty :editor))
 
 (defn cancel-prompt
@@ -50,7 +50,6 @@
   (set prompt-mode nil)
   (when editor-state
     (ed/set-text editor-state (or saved "")))
-  (import core/widget :as widget)
   (widget/mark-dirty :editor))
 
 (defn prompt-active?
@@ -141,7 +140,6 @@
 (defn batch-begin [] (set batch-mode true))
 
 (defn batch-end [&opt self]
-  (import core/widget :as widget)
   (def w (or self (widget/get-widget :editor)))
   (when w (flush-accum w))
   (set batch-mode false))
@@ -367,13 +365,8 @@
             (do (ed/move-up editor-state)
                 (put self :dirty true)
                 nil)
-            # At top row — try input history before scrolling
-            (let [entry (ih/prev (ed/text editor-state))]
-              (if entry
-                (do (ed/set-text editor-state entry)
-                    (put self :dirty true)
-                    nil)
-                :scroll-line-up))))
+            # At top row — scroll chat instead of input history
+            :scroll-line-up))
 
         (and (= key :down) (not alt) (not ctrl))
         (let [vis (ed/point->visual editor-state)
@@ -383,15 +376,28 @@
             (do (ed/move-down editor-state)
                 (put self :dirty true)
                 nil)
-            # At bottom row — try input history before scrolling
-            (if (ih/browsing?)
-              (let [entry (ih/next)]
-                (if entry
-                  (do (ed/set-text editor-state entry)
-                      (put self :dirty true)
-                      nil)
-                  :scroll-line-down))
-              :scroll-line-down)))
+            # At bottom row — scroll chat instead of input history
+            :scroll-line-down))
+
+        # Ctrl+Up: Previous input history
+        (and ctrl (= key :up))
+        (let [entry (ih/prev (ed/text editor-state))]
+          (if entry
+            (do (ed/set-text editor-state entry)
+                (put self :dirty true)
+                nil)
+            nil))
+
+        # Ctrl+Down: Next input history (when browsing)
+        (and ctrl (= key :down))
+        (if (ih/browsing?)
+          (let [entry (ih/next)]
+            (if entry
+              (do (ed/set-text editor-state entry)
+                  (put self :dirty true)
+                  nil)
+              nil))
+          nil)
 
         # Ctrl+G: open external editor
         (and ctrl (= key "g"))

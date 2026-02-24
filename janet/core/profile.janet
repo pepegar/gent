@@ -13,6 +13,7 @@
 #   (profile/enable)           — from init.janet or eval_janet
 
 (import core/hooks :as hooks)
+(import core/conversation :as conv)
 
 (var- enabled false)
 (var- stats @{})
@@ -134,7 +135,12 @@
   "Serialize trace events to Chrome Trace Event JSON. Write to path."
   [&opt path]
   (default path
-    (string ".gent/profile-" (math/floor (* (os/clock) 1000)) ".json"))
+    (do
+      (def session-name
+        (try
+          (conv/get-session-id)
+          ([_] (string (math/floor (* (os/clock) 1000))))))
+      (string ".gent/profile-" session-name ".json")))
   (os/mkdir ".gent")
   (def payload @{:traceEvents trace-events
                  :displayTimeUnit "ms"

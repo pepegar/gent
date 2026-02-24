@@ -21,6 +21,23 @@
 
 (var- stream-span-id nil)
 
+# ── Stream provider ───────────────────────────────────────────
+# Indirection layer for the LLM backend. Default wraps api/stream-start
+# and http/stream-read. Stage mode replaces this with a scriptable queue.
+
+(var- provider
+  @{:stream-start (fn [conv tools cbs &opt sys]
+      (api/stream-start conv tools cbs sys))
+    :stream-read (fn [stream-id]
+      (http/stream-read stream-id))
+    :stream-stop (fn [stream-id]
+      (http/stream-stop stream-id))})
+
+(defn set-provider
+  "Replace the stream provider. p must have :stream-start, :stream-read, :stream-stop."
+  [p]
+  (set provider p))
+
 # ── System prompt ──────────────────────────────────────────────
 
 (var- system-prompt
@@ -632,7 +649,7 @@
   (spinner-start "thinking…")
   (set stream-span-id (profile/begin "stream:api-call" "stream"))
   (def ctx
-    (api/stream-start
+    ((provider :stream-start)
       conversation
       (tools/definitions)
       @{:on-text (fn [text]
@@ -655,7 +672,7 @@
     (var budget 32)
     (while (and keep-going (> budget 0))
       (-- budget)
-      (def line (http/stream-read stream-id))
+      (def line ((provider :stream-read) stream-id))
       (cond
         (nil? line) (set keep-going false)
         (= :done line) (do (set result :done) (set keep-going false))
@@ -852,7 +869,7 @@
   (cond
     (= mode :streaming)
     (do
-      (http/stream-stop (get stream-ctx :stream-id))
+      ((provider :stream-stop) (get stream-ctx :stream-id))
       (stream-end-output)
       (spinner-stop)
       (output-info "— stopped —")
@@ -878,7 +895,7 @@
 
 (defn cleanup []
   (when (= mode :streaming)
-    (http/stream-stop (get stream-ctx :stream-id))
+    ((provider :stream-stop) (get stream-ctx :stream-id))
     (stream-end-output)
     (spinner-stop))
   (when (= mode :tools)

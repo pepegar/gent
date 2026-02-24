@@ -164,11 +164,11 @@
       (string/format "%d" x)
       (string/format "%g" x))
     (string? x)
-    (string `"` (string/replace-all `\` `\\`
-                  (string/replace-all `"` `\"`
+    (string `"` (string/replace-all "\t" `\t`
+                  (string/replace-all "\r" `\r`
                     (string/replace-all "\n" `\n`
-                      (string/replace-all "\r" `\r`
-                        (string/replace-all "\t" `\t` x))))) `"`)
+                      (string/replace-all `"` `\"`
+                        (string/replace-all `\` `\\` x))))) `"`)
     (keyword? x) (encode (string x))
     (buffer? x) (encode (string x))
     (or (array? x) (tuple? x))

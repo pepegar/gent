@@ -79,5 +79,13 @@
 # Stash loaded config paths for the startup banner
 (reg/set :loaded-configs loaded-configs)
 
-# Start the agent
-(agent/run)
+# Start the agent — optionally in stage mode
+(def stage-script (os/getenv "GENT_STAGE"))
+(if stage-script
+  (do
+    (import core/stage :as stage)
+    (stage/install)
+    (when (and (not= stage-script "1") (os/stat stage-script))
+      (dofile stage-script))
+    (agent/run))
+  (agent/run))

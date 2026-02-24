@@ -333,7 +333,7 @@
       cursor-row))
 
   (def cells @[])
-  (def normal-style (tui/style :fg :white))
+  (def normal-style (tui/style))
   (def selected-style (tui/style :reversed true))
   (def border-style (tui/style :fg :bright-black))
 

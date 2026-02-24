@@ -33,7 +33,10 @@
    "test/test-input-history"
    "test/test-inspect"
    "test/test-snapshot"
-   "test/test-profile"])
+   "test/test-profile"
+   "test/test-stage"
+   "test/test-scenario"
+   "test/test-editor-scroll"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native

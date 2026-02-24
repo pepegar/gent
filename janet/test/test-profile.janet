@@ -112,6 +112,22 @@
   (t/assert= (get-in stats ["meta-test" :count]) 1)
   (profile/disable)))
 
+(t/test "export-trace generates path with fallback timestamp" (fn []
+  (profile/reset)
+  (profile/enable)
+  
+  # Generate some profile data and export
+  (profile/with-span "export-test" "test" (fn [] nil))
+  (def path (profile/export-trace))
+  
+  # Verify the path uses either session name or timestamp format
+  (t/assert-truthy (string/has-prefix? ".gent/profile-" path))
+  (t/assert-truthy (string/has-suffix? ".json" path))
+  
+  # Clean up - remove the file if it was created
+  (try (os/rm path) ([_]))
+  (profile/disable)))
+
 # Clean up
 (profile/disable)
 (profile/reset)
