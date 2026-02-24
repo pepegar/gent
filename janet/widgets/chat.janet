@@ -194,21 +194,88 @@
   (array/clear steering-queue)
   (array/clear followup-queue))
 
-# ── Color scheme (matches core/ui) ────────────────────────────
+# ── Color scheme (Catppuccin) ─────────────────────────────────
+#
+# Two built-in themes: :dark (Mocha) and :light (Latte).
+# Switch with (chat/set-theme :dark) or (chat/set-theme :light).
+# Fine-tune individual keys with (chat/set-colors {...}).
+
+(def themes
+  "Built-in color schemes keyed by :dark / :light."
+  @{:dark
+    # Catppuccin Mocha — Base: 30 30 46
+    @{:user-label    (tui/style :fg [:rgb 137 180 250] :bold true)   # Blue
+      :agent-label   (tui/style :fg [:rgb 250 179 135] :bold true)   # Peach
+      :tool-label    (tui/style :fg [:rgb 166 227 161] :bold true)   # Green
+      :error-label   (tui/style :fg [:rgb 243 139 168] :bold true)   # Red
+      :separator     (tui/style :fg [:rgb 108 112 134])              # Overlay0
+      :eval-linenum  (tui/style :fg [:rgb 127 132 156])              # Overlay1
+      :eval-border   (tui/style :fg [:rgb 88 91 112])                # Surface2
+      :eval-code     (tui/style :fg [:rgb 205 214 244] :bg [:rgb 49 50 68])  # Text on Surface0
+      :tool-bg       (tui/style :fg [:rgb 108 112 134])              # Overlay0
+      :diff-red-fg   (tui/style :fg [:rgb 243 139 168] :bg [:rgb 60 30 42])  # Red on tinted surface
+      :diff-green-fg (tui/style :fg [:rgb 166 227 161] :bg [:rgb 30 58 42])  # Green on tinted surface
+      :user-row-bg     (tui/style :bg [:rgb 30 34 66])              # Blue-tinted Surface0
+      :agent-row-bg    (tui/style :bg [:rgb 56 40 48])              # Peach-tinted Surface0
+      :tool-row-bg     (tui/style :bg [:rgb 34 52 52])              # Green-tinted Surface0
+      :tool-success-bg (tui/style :bg [:rgb 30 56 44])              # Deeper green
+      :tool-error-bg   (tui/style :bg [:rgb 62 30 44])              # Deeper red
+      :reset        (tui/style)}
+
+    :light
+    # Catppuccin Latte — Base: 239 241 245
+    @{:user-label    (tui/style :fg [:rgb 30 102 245] :bold true)    # Blue
+      :agent-label   (tui/style :fg [:rgb 254 100 11] :bold true)   # Peach
+      :tool-label    (tui/style :fg [:rgb 64 160 43] :bold true)    # Green
+      :error-label   (tui/style :fg [:rgb 210 15 57] :bold true)    # Red
+      :separator     (tui/style :fg [:rgb 156 160 176])             # Overlay0
+      :eval-linenum  (tui/style :fg [:rgb 140 143 161])             # Overlay1
+      :eval-border   (tui/style :fg [:rgb 172 176 190])             # Surface2
+      :eval-code     (tui/style :fg [:rgb 76 79 105] :bg [:rgb 204 208 218])  # Text on Surface0
+      :tool-bg       (tui/style :fg [:rgb 156 160 176])             # Overlay0
+      :diff-red-fg   (tui/style :fg [:rgb 210 15 57] :bg [:rgb 245 218 222])  # Red on pink-tinted
+      :diff-green-fg (tui/style :fg [:rgb 64 160 43] :bg [:rgb 218 240 218])  # Green on green-tinted
+      :user-row-bg     (tui/style :bg [:rgb 220 225 248])           # Blue-tinted Mantle
+      :agent-row-bg    (tui/style :bg [:rgb 244 228 218])           # Peach-tinted Mantle
+      :tool-row-bg     (tui/style :bg [:rgb 222 238 224])           # Green-tinted Mantle
+      :tool-success-bg (tui/style :bg [:rgb 218 240 222])           # Deeper green
+      :tool-error-bg   (tui/style :bg [:rgb 246 218 224])           # Deeper red
+      :reset        (tui/style)}})
 
 (def- colors
-  @{:user-label   (tui/style :fg [:rgb 39 135 255] :bold true)
-    :agent-label  (tui/style :fg [:rgb 214 135 0] :bold true)
-    :tool-label   (tui/style :fg [:rgb 78 175 78] :bold true)
-    :error-label  (tui/style :fg [:rgb 196 50 50] :bold true)
-    :separator    (tui/style :fg (tui/color-indexed 240))
-    :eval-linenum (tui/style :fg [:rgb 140 140 160])
-    :eval-border  (tui/style :fg [:rgb 180 180 190])
-    :eval-code    (tui/style :fg [:rgb 30 30 30] :bg [:rgb 255 255 255])
-    :tool-bg      (tui/style :fg (tui/color-indexed 240))
-    :diff-red-fg  (tui/style :fg [:rgb 210 100 100] :bg [:rgb 80 20 20])
-    :diff-green-fg (tui/style :fg [:rgb 114 175 114] :bg [:rgb 20 80 20])
-    :reset        (tui/style)})
+  "Active color scheme. Starts as a copy of the dark theme."
+  (table/clone (themes :dark)))
+
+(defn set-theme
+  "Apply a built-in theme (:dark or :light). Call from ~/.gent/init.janet."
+  [name]
+  (def theme (get themes name))
+  (when (nil? theme) (error (string "unknown theme: " name)))
+  (eachp [k _] colors (put colors k nil))
+  (eachp [k v] theme (put colors k v)))
+
+(defn set-colors
+  "Override individual color entries on top of the current theme."
+  [overrides]
+  (eachp [k v] overrides
+    (put colors k v)))
+
+(defn detect-os-theme
+  "Detect the OS appearance. Returns :dark or :light.
+   On macOS, reads AppleInterfaceStyle. Defaults to :dark on other platforms."
+  []
+  (try
+    (let [result (process/exec "defaults" ["read" "-g" "AppleInterfaceStyle"])]
+      (if (and (= 0 (result :status))
+               (string/has-prefix? "Dark" (string/trim (result :stdout))))
+        :dark
+        :light))
+    ([_] :dark)))
+
+(defn auto-theme
+  "Detect the OS appearance and apply the matching theme."
+  []
+  (set-theme (detect-os-theme)))
 
 # ── Output helpers (scrollback-based) ─────────────────────────
 
@@ -279,12 +346,15 @@
       @{:text (string " " text) :style (tui/style)}]))
 
 (defn output-user [text]
+  (when (> (length scrollback) 0) (push-line ""))  # Single blank line
   (push-raw-line
     @[@{:text " you " :style (colors :user-label)}
-      @{:text (string " " text) :style (tui/style)}]))
+      @{:text (string " " text) :style (tui/style)}])
+  (put (last scrollback) :row-style :user-row-bg))
 
 (defn output-agent [lines]
   "Add agent response to scrollback with word-wrapping."
+  (when (> (length scrollback) 0) (push-line ""))  # Single blank line
   (def w (widget/get-widget :chat))
   (def max-width
     (if (and w (w :rect))
@@ -294,7 +364,8 @@
   (var first true)
   (each line parts
     (if (= "" line)
-      (push-line "")
+      (do (push-line "")
+          (put (last scrollback) :row-style :agent-row-bg))
       (do
         (def wrapped (word-wrap line max-width))
         (each wl wrapped
@@ -304,12 +375,15 @@
                 @[@{:text " gent " :style (colors :agent-label)}
                   @{:text (string " " wl) :style (tui/style)}])
               (set first false))
-            (push-line (string "       " wl))))))))
+            (push-line (string "       " wl)))
+          (put (last scrollback) :row-style :agent-row-bg)))))
+  (push-line ""))
 
 (defn output-tool [name &opt detail]
   (push-raw-line
     @[@{:text (string "  ▸ " name) :style (colors :tool-label)}
-      @{:text (if detail (string " " detail) "") :style (colors :separator)}]))
+      @{:text (if detail (string " " detail) "") :style (colors :separator)}])
+  (put (last scrollback) :row-style :tool-row-bg))
 
 (defn output-eval-janet [code]
   "Render eval_janet code with line numbers."
@@ -331,7 +405,8 @@
     (push-raw-line
       @[@{:text (string "    " linenum " ") :style (colors :eval-linenum)}
         @{:text "│" :style (colors :eval-border)}
-        @{:text (string " " code-line) :style (colors :eval-code)}])))
+        @{:text (string " " code-line) :style (colors :eval-code)}])
+    (put (last scrollback) :row-style :tool-row-bg)))
 
 (defn output-edit-file [input]
   "Render edit_file with diff display."
@@ -349,37 +424,46 @@
     (push-raw-line
       @[@{:text "  ▸ edit_file" :style (colors :tool-label)}
         @{:text (string " " path) :style (colors :separator)}]))
+  (put (last scrollback) :row-style :tool-row-bg)
 
   (when (not= "" old-str)
     (def old-lines (string/split "\n" old-str))
     (def show-n (min (length old-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "    - " (get old-lines i "")) (colors :diff-red-fg)))
+      (push-line (string "    - " (get old-lines i "")) (colors :diff-red-fg))
+      (put (last scrollback) :row-style :tool-row-bg))
     (when (> (length old-lines) max-diff-lines)
-      (push-line (string "      … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator))))
+      (push-line (string "      … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator))
+      (put (last scrollback) :row-style :tool-row-bg)))
 
   (when (not= "" new-str)
     (def new-lines (string/split "\n" new-str))
     (def show-n (min (length new-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "    + " (get new-lines i "")) (colors :diff-green-fg)))
+      (push-line (string "    + " (get new-lines i "")) (colors :diff-green-fg))
+      (put (last scrollback) :row-style :tool-success-bg))
     (when (> (length new-lines) max-diff-lines)
-      (push-line (string "      … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator)))))
+      (push-line (string "      … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator))
+      (put (last scrollback) :row-style :tool-success-bg))))
 
 (var- tool-result-max-lines 10)
 
 (defn set-tool-result-max-lines [n]
   (set tool-result-max-lines n))
 
-(defn output-tool-result [text]
+(defn output-tool-result [text &opt success]
+  (default success true)
+  (def row-bg (if success :tool-success-bg :tool-error-bg))
   (def lines (string/split "\n" text))
   (def total (length lines))
   (def show-lines (min total tool-result-max-lines))
   (for i 0 show-lines
     (def line (get lines i ""))
-    (push-line (string "    " line) (colors :separator)))
+    (push-line (string "    " line) (colors :separator))
+    (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
-    (push-line (string "    … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))))
+    (push-line (string "    … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
+    (put (last scrollback) :row-style row-bg)))
 
 # ── Pluggable tool renderers ──────────────────────────────────
 
@@ -395,6 +479,7 @@
     (put tool-result-renderers name nil)))
 
 (defn render-tool-call [name input]
+  (when (> (length scrollback) 0) (push-line ""))
   (def custom (get tool-renderers name))
   (if custom
     (custom input)
@@ -407,9 +492,13 @@
   (def custom (get tool-result-renderers name))
   (if custom
     (custom result)
-    (if (or (table? result) (array? result) (tuple? result))
-      (output-tool-result (string "[Image: " (get-in result [:source :media_type] "unknown") "]"))
-      (output-tool-result (string result)))))
+    (do
+      (def text (if (or (table? result) (array? result) (tuple? result))
+                  (string "[Image: " (get-in result [:source :media_type] "unknown") "]")
+                  (string result)))
+      (def is-error (and (string? text)
+                         (string/has-prefix? "Error" text)))
+      (output-tool-result text (not is-error)))))
 
 (defn output-eval [code result]
   "Display an inline Janet eval."
@@ -427,6 +516,7 @@
 (var- stream-state @{:active false :line-buf @"" :first true})
 
 (defn- stream-start-output []
+  (when (> (length scrollback) 0) (push-line ""))  # Single blank line
   (put stream-state :active true)
   (put stream-state :first true)
   (buffer/clear (stream-state :line-buf)))
@@ -444,7 +534,8 @@
         (def line (string buf))
         (buffer/clear buf)
         (if (= "" line)
-          (push-line "")
+          (do (push-line "")
+              (put (last scrollback) :row-style :agent-row-bg))
           (do
             (def wrapped (word-wrap line max-width))
             (each wl wrapped
@@ -454,9 +545,9 @@
                     @[@{:text " gent " :style (colors :agent-label)}
                       @{:text (string " " wl) :style (tui/style)}])
                   (put stream-state :first false))
-                (push-line (string "       " wl)))))))
+                (push-line (string "       " wl)))
+              (put (last scrollback) :row-style :agent-row-bg)))))
       (buffer/push buf byte)))
-  # Mark dirty so the partial line in the buffer gets rendered each frame
   (widget/mark-dirty :chat))
 
 (defn- stream-end-output []
@@ -476,10 +567,13 @@
             @[@{:text " gent " :style (colors :agent-label)}
               @{:text (string " " wl) :style (tui/style)}])
           (put stream-state :first false))
-        (push-line (string "       " wl)))))
+        (push-line (string "       " wl)))
+      (put (last scrollback) :row-style :agent-row-bg)))
+  (def had-content (not (stream-state :first)))
   (buffer/clear buf)
   (put stream-state :active false)
-  (put stream-state :first true))
+  (put stream-state :first true)
+  (when had-content (push-line "")))
 
 # ── Spinner ────────────────────────────────────────────────────
 # Spinner renders into the last line of the chat area (not the editor row).
@@ -810,7 +904,7 @@
             (def result (string "Error: " event-data))
             (hooks/run :after-tool-call (tc :name) (tc :input) result)
             (spinner-stop)
-            (render-tool-result (tc :name) result)
+            (output-tool-result result false)
             (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
             (put tool-exec :async-handle nil)
             (put tool-exec :current-idx (+ idx 1))
@@ -888,6 +982,7 @@
   # Build visual rows from the bottom up until we fill the viewport.
   # We walk backwards from (total - scroll-offset) and expand each
   # scrollback line into its wrapped visual rows.
+  # Each entry is [cells row-style-key] where row-style-key is a keyword or nil.
   (def end-idx (max 0 (- total scroll-offset)))
   (def visual-rows @[])
 
@@ -895,10 +990,10 @@
   (while (and (>= line-idx 0) (< (length visual-rows) render-height))
     (def line (get scrollback line-idx))
     (def rows (line-to-visual-rows line width))
-    # Prepend rows in reverse so they end up in order
+    (def rs (line :row-style))
     (var ri (- (length rows) 1))
     (while (and (>= ri 0) (< (length visual-rows) render-height))
-      (array/push visual-rows (get rows ri))
+      (array/push visual-rows [(get rows ri) rs])
       (-- ri))
     (-- line-idx))
 
@@ -911,12 +1006,21 @@
 
   # Render each visual row
   (for i 0 visible-count
-    (def row (get ordered i))
+    (def [row rs] (get ordered i))
     (def y (+ (rect :y) y-offset i))
+    (def row-bg (when rs (get colors rs)))
+    # Fill the full row with bg color first
+    (when row-bg
+      (for x (rect :x) (+ (rect :x) width)
+        (tui/buffer-set-char buf x y " " row-bg)))
     (var col (rect :x))
     (each cell row
       (when (>= col (+ (rect :x) width)) (break))
-      (tui/buffer-set-char buf col y (cell :text) (cell :style))
+      (def final-style
+        (if (and row-bg (nil? (get (cell :style) :bg)))
+          (tui/style-merge row-bg (cell :style))
+          (cell :style)))
+      (tui/buffer-set-char buf col y (cell :text) final-style)
       (++ col)))
 
   # Render the in-progress streaming line (partial line not yet newline-terminated)
@@ -927,9 +1031,13 @@
     (when (< partial-y (+ (rect :y) height))
       (if (stream-state :first)
         (do
-          (tui/buffer-set-string buf (rect :x) partial-y " gent " (colors :agent-label))
-          (tui/buffer-set-string buf (+ (rect :x) 6) partial-y (string " " partial-text) (tui/style)))
-        (tui/buffer-set-string buf (rect :x) partial-y (string "       " partial-text) (tui/style)))))
+          (def label-style (colors :agent-label))
+          (def text-style (tui/style))
+          (tui/buffer-set-string buf (rect :x) partial-y " gent " label-style)
+          (tui/buffer-set-string buf (+ (rect :x) 6) partial-y (string " " partial-text) text-style))
+        (do
+          (def style (tui/style))
+          (tui/buffer-set-string buf (rect :x) partial-y (string "       " partial-text) style)))))
 
   # Render spinner on last row if active
   (when (spinner-active?)
@@ -937,7 +1045,8 @@
     (def msg (spinner-state :message))
     (def y (+ (rect :y) (- height 1)))
     (def spin-text (string " " frame " " msg))
-    (tui/buffer-set-string buf (rect :x) y spin-text (colors :separator))))
+    (def style (colors :separator))
+    (tui/buffer-set-string buf (rect :x) y spin-text style)))
 
 # ── Widget constructor ─────────────────────────────────────────
 

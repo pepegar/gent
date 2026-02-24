@@ -37,6 +37,11 @@
 # Discover AGENTS.md files walking up from cwd
 (agents-md/discover)
 
+# Auto-detect OS dark/light mode and apply matching Catppuccin theme.
+# User can override in ~/.gent/init.janet with (chat/set-theme :dark) etc.
+(import widgets/chat :as chat)
+(chat/auto-theme)
+
 # User config — load ~/.gent/init.janet if it exists (like ~/.emacs)
 # We add ~/.gent/ to the module path so user init can (import) their own modules from there too.
 (def- loaded-configs @[])
