@@ -46,14 +46,6 @@
       (buffer/push buf (string/format "%%%02X" byte))))
   (string buf))
 
-(defn- random-hex
-  "Generate n random hex characters."
-  [n]
-  (def buf @"")
-  (for _ 0 n
-    (buffer/push buf (string/format "%x" (math/rng-int rng 16))))
-  (string buf))
-
 (defn- sessions-base-dir
   "Return the base sessions directory: ~/.gent/sessions"
   []
@@ -75,6 +67,40 @@
       (set current (string current "/" part))
       (when (not (os/stat current))
         (os/mkdir current)))))
+
+(defn- timestamp-session-id
+  "Generate a timestamp-based session ID: YYYYMMDD-HHMMSS-nnnn
+   Handles same-second collisions with a counter file."
+  []
+  (def now (os/date))
+  (def timestamp-base (string/format "%04d%02d%02d-%02d%02d%02d"
+                                    (get now :year)
+                                    (+ 1 (get now :month))  # month is 0-based
+                                    (get now :month-day)
+                                    (get now :hours)
+                                    (get now :minutes)
+                                    (get now :seconds)))
+  
+  # Handle collision detection with counter file
+  (def sessions-dir (project-sessions-dir))
+  (ensure-dir sessions-dir)
+  (def counter-file (string sessions-dir "/." timestamp-base "-counter"))
+  
+  (def counter (if (os/stat counter-file)
+                 (scan-number (string/trim (slurp counter-file)))
+                 0))
+  (def next-counter (+ counter 1))
+  (spit counter-file (string next-counter))
+  
+  (string timestamp-base "-" (string/format "%04d" next-counter)))
+
+(defn- random-hex
+  "Generate n random hex characters."
+  [n]
+  (def buf @"")
+  (for _ 0 n
+    (buffer/push buf (string/format "%x" (math/rng-int rng 16))))
+  (string buf))
 
 (defn- append-to-log
   "Append a message to the session history file."
@@ -99,7 +125,7 @@
   "Create a new session. Sets up the session directory and history file.
    Called once at startup."
   []
-  (def sid (random-hex 8))
+  (def sid (timestamp-session-id))
   (set session-id sid)
   (set session-dir (string (project-sessions-dir) "/" sid))
   (ensure-dir session-dir)
@@ -198,7 +224,7 @@
   []
   (def old-sid session-id)
   (def old-history history-path)
-  (def new-sid (random-hex 8))
+  (def new-sid (timestamp-session-id))
   (def new-dir (string (project-sessions-dir) "/" new-sid))
   (ensure-dir new-dir)
   (def new-path (string new-dir "/history"))

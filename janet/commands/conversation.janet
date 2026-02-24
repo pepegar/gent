@@ -32,11 +32,26 @@
        "No sessions found."
        (do
          (def current (conv/get-session-id))
-         (def lines @["Sessions:"])
+         (def lines @["Sessions (chronological order):"])
          (each s sessions
-           (if (= s current)
-             (array/push lines (string "  " s " (current)"))
-             (array/push lines (string "  " s))))
+           (def marker (if (= s current) " (current)" ""))
+           # Parse timestamp from session ID for better display
+           (if (string/has-prefix? s "20")
+             (do
+               (def parts (string/split "-" s))
+               (when (>= (length parts) 3)
+                 (def date-part (get parts 0))
+                 (def time-part (get parts 1))
+                 (def counter-part (get parts 2))
+                 (def date-str (string (string/slice date-part 0 4) "/"
+                                      (string/slice date-part 4 6) "/"
+                                      (string/slice date-part 6 8)))
+                 (def time-str (string (string/slice time-part 0 2) ":"
+                                      (string/slice time-part 2 4) ":"
+                                      (string/slice time-part 4 6)))
+                 (array/push lines (string "  " s " — " date-str " " time-str marker))))
+             # Fallback for old random session IDs
+             (array/push lines (string "  " s marker))))
          (string/join lines "\n"))))})
 
 (commands/register "resume"
