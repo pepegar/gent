@@ -24,6 +24,7 @@
 (import tools/bash)
 (import tools/eval-janet)
 (import tools/use-skill)
+(import tools/prompt-user)
 
 # Built-in slash commands
 (import commands/conversation)

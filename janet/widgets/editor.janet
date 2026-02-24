@@ -10,6 +10,7 @@
 (import core/buffers :as buffers)
 (import widgets/editor_new :as ed)
 (import core/completion :as completion)
+(import core/dialog :as dialog)
 (import core/input-history :as ih)
 (import core/widget :as widget)
 (import tui)
@@ -168,6 +169,40 @@
       (def ctrl (get event :ctrl false))
       (def alt (get event :alt false))
       (def shift (get event :shift false))
+
+      # ── Dialog key interception ───────────────────────────
+      # When a dialog is active, all keys go to the dialog.
+      (when (dialog/active?)
+        (cond
+          (and (= key :enter) (not alt) (not shift))
+          (do (dialog/submit) (break nil))
+
+          (or (= key :escape) (and ctrl (= key "c")))
+          (do (dialog/dismiss) (break nil))
+
+          (= (dialog/get-type) :input)
+          (do
+            (cond
+              (= key :backspace) (dialog/input-delete-back)
+              (and (= key :left) (not ctrl) (not alt)) (do (dialog/input-move-left) (widget/mark-dirty :chat))
+              (and (= key :right) (not ctrl) (not alt)) (do (dialog/input-move-right) (widget/mark-dirty :chat))
+              (and ctrl (= key "u")) (dialog/input-clear)
+              (and (string? key) (not ctrl) (not alt)) (dialog/input-insert key))
+            (break nil))
+
+          (or (= key :up) (and (string? key) (= key "k") (not ctrl) (not alt)))
+          (do (dialog/select-prev) (break nil))
+
+          (or (= key :down) (and (string? key) (= key "j") (not ctrl) (not alt)))
+          (do (dialog/select-next) (break nil))
+
+          (and (string? key) (not ctrl) (not alt))
+          (do
+            (when-let [n (scan-number key)]
+              (when (and (>= n 1) (<= n 9))
+                (dialog/select-idx (- n 1))))
+            (break nil)))
+        (break nil))
 
       # ── Prompt mode key interception ──────────────────────
       # When prompt mode is active, only basic editing and Enter/Escape work.

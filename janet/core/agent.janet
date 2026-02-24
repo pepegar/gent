@@ -26,6 +26,7 @@
 (import widgets/editor :as editor-w)
 (import widgets/separator :as sep)
 (import core/completion :as completion)
+(import core/dialog :as dialog)
 (import core/profile :as profile)
 
 # ── Layout ─────────────────────────────────────────────────────
@@ -69,6 +70,7 @@
   (when (nil? prev-buf) (break false))
   (when popup-was-visible (break false))
   (when (completion/active?) (break false))
+  (when (dialog/active?) (break false))
 
   (def chat-w (widget/get-widget :chat))
   (when (nil? chat-w) (break false))
@@ -210,6 +212,29 @@
         (when (not (empty? parts))
           (array/push parts "\x1b[0m")
           (term/write (string ;parts))))))
+
+  # Render dialog overlay (if active)
+  (when (and prev-buf screen-area (dialog/active?))
+    (def popup (dialog/render-overlay screen-area))
+    (when popup
+      (set popup-was-visible true)
+      (def parts @[])
+      (var cur-style nil)
+      (each cell (popup :cells)
+        (def x (cell :x))
+        (def y (cell :y))
+        (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+        (def st (cell :style))
+        (when (not (tui/style= st cur-style))
+          (array/push parts "\x1b[0m")
+          (def sgr (tui/style->sgr st))
+          (when (not= sgr "") (array/push parts sgr))
+          (set cur-style st))
+        (array/push parts (cell :ch))
+        (tui/buffer-set-char prev-buf x y (cell :ch) st))
+      (when (not (empty? parts))
+        (array/push parts "\x1b[0m")
+        (term/write (string ;parts)))))
 
   # Restore cursor to editor position
   (editor/redraw))

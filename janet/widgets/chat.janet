@@ -691,23 +691,44 @@
   (when had-content (push-line "")))
 
 # ── Spinner ────────────────────────────────────────────────────
-# Spinner renders into the last line of the chat area (not the editor row).
+# Spinner renders as a 3-row gentleman with top hat, monocle, and occasional smile.
 
-(def- spinner-frames ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"])
-(var- spinner-state @{:active false :frame 0 :message ""})
+(def- spinner-height 3)
+(def- spinner-gent-width 6)
+(def- spinner-frames
+  [#                hat      brim     face
+   ["  ┌─┐ " " ─┴─┴─" "  ◔_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ●_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◔_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ●‿• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◕‿• "]
+   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]])
+(def- spinner-interval 167)
+(var- spinner-state @{:active false :frame 0 :message "" :last-tick 0})
 
 (defn- spinner-start [msg]
   (put spinner-state :active true)
   (put spinner-state :frame 0)
   (put spinner-state :message msg)
+  (put spinner-state :last-tick (os/clock))
   (widget/mark-dirty :chat))
 
 (defn- spinner-active? [] (spinner-state :active))
 
 (defn- spinner-tick []
   (when (spinner-state :active)
-    (put spinner-state :frame (% (+ (spinner-state :frame) 1) (length spinner-frames)))
-    (widget/mark-dirty :chat)))
+    (def now (os/clock))
+    (def elapsed (* (- now (spinner-state :last-tick)) 1000))
+    (when (>= elapsed spinner-interval)
+      (put spinner-state :last-tick now)
+      (put spinner-state :frame (% (+ (spinner-state :frame) 1) (length spinner-frames)))
+      (widget/mark-dirty :chat))))
 
 (defn- spinner-stop []
   (when (spinner-state :active)
@@ -1165,7 +1186,7 @@
   # Leave room for spinner and partial line at bottom if active and at bottom
   (def has-partial (and (stream-state :active) (> (length (stream-state :line-buf)) 0) (= scroll-offset 0)))
   (def has-spinner (and (spinner-active?) (= scroll-offset 0)))
-  (def reserved-bottom (+ (if has-spinner 1 0) (if has-partial 1 0)))
+  (def reserved-bottom (+ (if has-spinner spinner-height 0) (if has-partial 1 0)))
   (def render-height (- height reserved-bottom))
 
   # Build visual rows from the bottom up until we fill the viewport.
@@ -1247,14 +1268,18 @@
           (def style (tui/style))
           (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "        " partial-text) style)))))
 
-  # Render spinner on last row if active (only when at bottom of conversation)
+  # Render spinner (3-row gentleman) at bottom when active and scrolled to bottom
   (when (and (spinner-active?) (= scroll-offset 0))
     (def frame (get spinner-frames (spinner-state :frame)))
     (def msg (spinner-state :message))
-    (def y (+ (rect :y) (- height 1)))
-    (def spin-text (string " " frame " " msg))
     (def style (colors :separator))
-    (tui/buffer-set-string buf (rect :x) y spin-text style)))
+    (def y-base (+ (rect :y) (- height spinner-height)))
+    (def x (rect :x))
+    # Draw hat, brim, face (3 rows)
+    (for i 0 spinner-height
+      (tui/buffer-set-string buf x (+ y-base i) (get frame i) style))
+    # Draw message next to the brim (middle row)
+    (tui/buffer-set-string buf (+ x spinner-gent-width 1) (+ y-base 1) msg style)))
 
 # ── Widget constructor ─────────────────────────────────────────
 

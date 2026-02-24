@@ -200,6 +200,110 @@ tui-wright kill abc123
 | `widget:update-all` | update | Per-frame widget polling (chat drains stream, polls tools) |
 | `tool:*` | tool | Individual tool execution (auto-instrumented via hooks) |
 
+## Recording demos with tui-wright + asciinema
+
+Use the stage system to create scripted, reproducible demo recordings without real API calls. The workflow: write a Janet script that queues fake LLM responses, launch gent with `GENT_STAGE=script.janet`, drive the TUI with tui-wright, and record to asciicast format.
+
+### Stage mode
+
+`boot.janet` checks `GENT_STAGE` env var:
+
+```sh
+# Pure stage mode (no script, responses default to "(no response queued)")
+GENT_STAGE=1 ./target/debug/gent
+
+# Stage mode with a script that pre-queues responses
+GENT_STAGE=/path/to/demo.janet ./target/debug/gent
+```
+
+The script runs before `(agent/run)`, so queued responses are ready when the reactor starts.
+
+### Writing a stage script
+
+```janet
+(import core/stage :as stage)
+
+# Simple text response
+(stage/respond (stage/text "Hello! I'm gent."))
+
+# Streaming text (token-by-token, shows the spinner)
+(stage/respond (stage/text-stream "This streams slowly..." :token-delay 0.05))
+
+# Thinking then text (shows spinner during thinking phase)
+(stage/respond (stage/thinking-then-text
+  "Let me reason about this..."
+  "Here is my answer."))
+
+# Tool call (triggers tool execution, needs a follow-up response)
+(stage/respond (stage/tool-call "prompt_user"
+  {:type "select" :title "Pick one" :options [{:label "A"} {:label "B"}]}
+  :id "toolu_1"))
+(stage/respond (stage/text "You picked a good one!"))
+
+# Bulk queue
+(stage/sequence [(stage/text "First") (stage/text "Second")])
+```
+
+Responses are FIFO — queue them in conversation order. Each user submit pops the next response. Tool calls that return results trigger another API call, so queue a follow-up for each.
+
+### Recording with tui-wright trace
+
+tui-wright has built-in asciicast v2 recording via `tui-wright trace start/stop`:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+CAST="/tmp/demo.cast"
+PROJECT="/path/to/gent"
+
+# Spawn session
+SESSION=$(tui-wright spawn bash --cols 100 --rows 30 2>&1 | grep -oE '[a-f0-9]+$')
+
+# Start recording
+tui-wright trace start "$SESSION" --output "$CAST"
+sleep 0.5
+
+# Launch gent in stage mode
+tui-wright type "$SESSION" " cd $PROJECT && GENT_STAGE=/tmp/demo.janet ./target/debug/gent"
+tui-wright key "$SESSION" enter
+sleep 3
+
+# Interact: type a message and submit
+tui-wright type "$SESSION" "Hello, what can you do?"
+sleep 0.5
+tui-wright key "$SESSION" enter
+sleep 4
+
+# Navigate a dialog (if one appears): arrow keys + enter
+tui-wright key "$SESSION" down
+sleep 0.3
+tui-wright key "$SESSION" enter
+sleep 3
+
+# Quit and stop recording
+tui-wright key "$SESSION" ctrl+c
+sleep 1
+tui-wright trace stop "$SESSION"
+tui-wright kill "$SESSION" 2>/dev/null || true
+```
+
+### Uploading
+
+```sh
+asciinema upload /tmp/demo.cast
+```
+
+Note: asciinema.org has a file size limit. Keep demos short (under 30s) to stay well under it. If the cast is too large, coalesce events or shorten sleep times.
+
+### Tips
+
+- **Prefix the cd command with a space** (` cd ...`) so it doesn't save in shell history.
+- **Add sleep between actions** — the TUI needs time to process and redraw (0.3-0.5s after key/mouse events, 2-3s after launching gent or submitting a prompt, longer for streaming responses).
+- **Use `tui-wright screen $SESSION`** to inspect the terminal at any point for debugging.
+- **`thinking-then-text`** is the best way to show the spinner — the thinking phase takes visible time before text appears.
+- **Tool calls with `prompt_user`** show the dialog overlay — use `tui-wright key` for arrow navigation and enter to select.
+
 ## Dependencies
 
 - **Rust** + **Cargo** for building
