@@ -124,5 +124,61 @@
   (def h-moves (length (string/find-all "H" diff)))
   (t/assert-truthy (>= h-moves 2))))
 
+# ── Plain text extraction tests ──────────────────────────────
+
+(t/test "buffer-to-plain-rows returns array of strings" (fn []
+  (def buf (buffer (rect 0 0 5 3)))
+  (buffer-set-string buf 0 0 "Hello")
+  (buffer-set-string buf 0 1 "World")
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (length rows) 3)
+  (t/assert= (get rows 0) "Hello")
+  (t/assert= (get rows 1) "World")
+  (t/assert= (get rows 2) "")))
+
+(t/test "buffer-to-plain-rows trims trailing spaces" (fn []
+  (def buf (buffer (rect 0 0 10 1)))
+  (buffer-set-string buf 0 0 "Hi")
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (get rows 0) "Hi")))
+
+(t/test "buffer-to-plain-rows preserves leading spaces" (fn []
+  (def buf (buffer (rect 0 0 10 1)))
+  (buffer-set-string buf 3 0 "Hi")
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (get rows 0) "   Hi")))
+
+(t/test "buffer-to-text joins rows with newlines" (fn []
+  (def buf (buffer (rect 0 0 5 2)))
+  (buffer-set-string buf 0 0 "AB")
+  (buffer-set-string buf 0 1 "CD")
+  (t/assert= (buffer-to-text buf) "AB\nCD")))
+
+(t/test "buffer-to-text empty buffer" (fn []
+  (def buf (buffer (rect 0 0 3 2)))
+  (t/assert= (buffer-to-text buf) "\n")))
+
+(t/test "buffer-to-text with UTF-8" (fn []
+  (def buf (buffer (rect 0 0 6 1)))
+  (buffer-set-string buf 0 0 "─X─")
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (get rows 0) "─X─")))
+
+(t/test "buffer-to-text with styles ignores styles" (fn []
+  (def buf (buffer (rect 0 0 5 1)))
+  (buffer-set-string buf 0 0 "Red" (style :fg :red))
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (get rows 0) "Red")))
+
+(t/test "buffer-to-plain-rows with offset rect" (fn []
+  (def buf (buffer (rect 5 10 3 2)))
+  (buffer-set-char buf 5 10 "A")
+  (buffer-set-char buf 6 10 "B")
+  (buffer-set-char buf 5 11 "C")
+  (def rows (buffer-to-plain-rows buf))
+  (t/assert= (length rows) 2)
+  (t/assert= (get rows 0) "AB")
+  (t/assert= (get rows 1) "C")))
+
 (def pass (t/pass))
 (def fail (t/fail))

@@ -103,6 +103,28 @@
       (for x (clipped :x) (rect-right clipped)
         (buffer-set-char buf x y ch st)))))
 
+# ── Plain text extraction (snapshot testing) ──────────────────
+
+(defn buffer-to-plain-rows
+  "Convert the buffer to an array of plain text strings (no ANSI escapes).
+   Trailing spaces are trimmed from each row. Useful for snapshot testing."
+  [buf]
+  (def a (buf :area))
+  (def rows @[])
+  (for row 0 (a :height)
+    (def chars @[])
+    (for col 0 (a :width)
+      (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
+      (array/push chars (c :ch)))
+    (array/push rows (string/trimr (string ;chars))))
+  rows)
+
+(defn buffer-to-text
+  "Convert the buffer to a plain text string with rows joined by newlines.
+   Trailing spaces are trimmed per row. Useful for snapshot testing."
+  [buf]
+  (string/join (buffer-to-plain-rows buf) "\n"))
+
 # ── Buffer diffing ─────────────────────────────────────────────
 
 (defn buffer-diff
