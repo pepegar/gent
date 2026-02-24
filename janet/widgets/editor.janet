@@ -332,9 +332,10 @@
           (put self :dirty true)
           [:eval text])
 
-        # Escape: clear or stop
+        # Escape: clear input or stop
         (= key :escape)
-        (if (> (length (ed/text editor-state)) 0)
+        (cond
+          (> (length (ed/text editor-state)) 0)
           (do (ih/reset)
               (ed/set-text editor-state "")
               (put self :dirty true)
@@ -349,8 +350,6 @@
           (term/write "\x1b[?1049h")  # enter alternate screen buffer
           (term/write "\x1b[2J")      # clear screen
           (term/write "\x1b[?25h")    # show cursor
-          (term/write "\x1b[?1000h")  # enable mouse button tracking
-          (term/write "\x1b[?1006h")  # enable SGR extended mouse mode
           (term/write "\x1b[>1u")     # enable Kitty keyboard protocol
           (put self :dirty true)
           :rerender)
@@ -404,7 +403,7 @@
             (spit tmpfile (result :text))
             (term/write "\x1b[<u")
             (term/write "\x1b[?1006l")
-            (term/write "\x1b[?1000l")
+            (term/write "\x1b[?1002l")
             (term/write "\x1b[?25h")
             (term/write "\x1b[?1049l")
             (term/disable-raw-mode)
@@ -419,7 +418,7 @@
               (os/rm tmpfile))
             (term/enable-raw-mode)
             (term/write "\x1b[?1049h")
-            (term/write "\x1b[?1000h")
+            (term/write "\x1b[?1002h")
             (term/write "\x1b[?1006h")
             (term/write "\x1b[>1u")
             (term/write "\x1b[2J")

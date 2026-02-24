@@ -214,18 +214,14 @@
 (defn run
   "Main reactor loop."
   []
-  # Set up TUI — alternate screen, raw mode, mouse capture
+  # Set up TUI — alternate screen, raw mode (no mouse capture)
   (term/enable-raw-mode)
   (term/write "\x1b[?1049h")  # enter alternate screen buffer
   (term/write "\x1b[2J")      # clear screen
   (term/write "\x1b[?25h")    # show cursor
-  (term/write "\x1b[?1000h")  # enable mouse button tracking (includes scroll)
-  (term/write "\x1b[?1006h")  # enable SGR extended mouse mode
   (term/write "\x1b[>1u")     # enable Kitty keyboard protocol (disambiguate Shift+Enter etc.)
   (defer (do
     (term/write "\x1b[<u")      # pop Kitty keyboard enhancement flags
-    (term/write "\x1b[?1006l")  # disable SGR mouse mode
-    (term/write "\x1b[?1000l")  # disable mouse tracking
     (term/write "\x1b[?25h")
     (term/write "\x1b[?1049l")  # leave alternate screen buffer
     (term/disable-raw-mode))
