@@ -30,12 +30,11 @@
 
 # ── Layout ─────────────────────────────────────────────────────
 
-(defn- default-layout
-  "Default layout: chat on top, separator, editor at bottom."
-  [area]
-  (def ed-height (editor/get-height))
-  (def [chat-area sep-area editor-area] (tui/vsplit area :fill 1 ed-height))
-  @{:chat chat-area :separator sep-area :editor editor-area})
+(def- default-layout-data
+  @[{:constraint :fill
+     :children [{:widget :chat :constraint :fill}]}
+    {:widget :separator :constraint 1}
+    {:widget :editor :constraint |(editor/get-height)}])
 
 (defn- sync-ui-layout
   "Sync widget layout back to core/ui for backward compatibility."
@@ -285,8 +284,9 @@
     (widget/register (sep/create))
     (widget/register (editor-w/create))
 
-    # Set layout
-    (widget/set-layout-fn default-layout)
+    # Set layout (only if user config hasn't already set one via -l etc.)
+    (unless (widget/has-layout?)
+      (widget/set-layout-data default-layout-data))
     (refresh-and-layout)
 
     # Focus the editor

@@ -3,6 +3,7 @@
 # The widget infrastructure for gent's TUI. Widgets are independent UI
 # components with their own state, event handling, and rendering.
 #
+(import tui/layout :as tui-layout)
 # Widget protocol:
 #   :name     — keyword, unique identifier
 #   :state    — mutable state table (widget owns this)
@@ -68,30 +69,51 @@
 # ── Layout ─────────────────────────────────────────────────────
 
 (var- layout-fn nil)
+(var- layout-data nil)
 (var- named-layouts @{})
 
 (defn register-layout
-  "Register a named layout function.
-   Layout fn signature: (fn [area] @{:widget-name rect ...})"
-  [name f]
-  (put named-layouts name f))
+  "Register a named layout (function or declarative data structure).
+   Function signature: (fn [area] @{:widget-name rect ...})
+   Data: array of row descriptors (see tui/layout resolve-layout)."
+  [name layout]
+  (put named-layouts name layout))
 
 (defn set-layout
   "Switch to a named layout."
   [name]
-  (set layout-fn (get named-layouts name)))
+  (def layout (get named-layouts name))
+  (if (function? layout)
+    (do (set layout-fn layout) (set layout-data nil))
+    (do (set layout-data layout) (set layout-fn nil))))
 
 (defn set-layout-fn
   "Set a custom layout function directly."
   [f]
-  (set layout-fn f))
+  (set layout-fn f)
+  (set layout-data nil))
+
+(defn set-layout-data
+  "Set a declarative layout data structure directly."
+  [data]
+  (set layout-data data)
+  (set layout-fn nil))
+
+(defn has-layout?
+  "Return true if a layout function or data has been set."
+  []
+  (or (not (nil? layout-fn)) (not (nil? layout-data))))
 
 (defn do-layout
-  "Run the layout function and assign rects to widgets.
+  "Run the layout and assign rects to widgets.
    Returns the assignments table."
   [area]
-  (when layout-fn
-    (def assignments (layout-fn area))
+  (def assignments
+    (cond
+      layout-data (tui-layout/resolve-layout layout-data area)
+      layout-fn   (layout-fn area)
+      nil))
+  (when assignments
     (eachp [name rect] assignments
       (when-let [w (get widgets name)]
         (put w :rect rect)))

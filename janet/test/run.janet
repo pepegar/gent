@@ -21,6 +21,7 @@
    "test/test-text"
    "test/test-block"
    "test/test-layout"
+   "test/test-declarative-layout"
    "test/test-hooks"
    "test/test-commands"
    "test/test-registers"

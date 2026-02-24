@@ -54,6 +54,27 @@ fn extract_embedded_janet_code() -> PathBuf {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse CLI flags before booting the Janet VM
+    let args: Vec<String> = std::env::args().collect();
+    let mut load_files: Vec<String> = Vec::new();
+    let mut no_init = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-l" | "--load" => {
+                if i + 1 < args.len() {
+                    load_files.push(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("error: -l requires a file argument");
+                    std::process::exit(1);
+                }
+            }
+            "-q" | "--no-init-file" => { no_init = true; i += 1; }
+            _ => { i += 1; }
+        }
+    }
+
     let mut client = JanetClient::init_with_default_env()?;
 
     // Register native functions (the "syscalls" of the machine)
@@ -65,6 +86,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.run(format!(
         r#"(setdyn :syspath "{janet_dir_str}")"#
     ))?;
+
+    // Pass CLI flags to Janet via dynamic variables
+    if no_init {
+        client.run(r#"(setdyn :gent/no-init true)"#)?;
+    }
+    if !load_files.is_empty() {
+        let janet_array = load_files.iter()
+            .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect::<Vec<_>>().join(" ");
+        client.run(format!(r#"(setdyn :gent/load-files @[{}])"#, janet_array))?;
+    }
 
     // Load and run boot.janet — from here, Janet takes over
     let boot_path = janet_dir.join("boot.janet");
