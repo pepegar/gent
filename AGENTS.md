@@ -75,6 +75,28 @@ The test framework is `janet/test/helper.janet` — a minimal assertion library:
 
 Tests can run under plain `janet` (no Rust runtime needed) because `test/fake-http.janet` provides mocks for all native functions.
 
+### Snapshot testing
+
+Widget rendering is verified with buffer snapshot tests. The pattern:
+
+1. Create a widget with a fixed rect via `setup`
+2. Feed it state (call `output-user`, `output-agent`, `output-tool`, etc.)
+3. Render into a `tui/buffer`
+4. Extract plain text with `buffer-to-plain-rows` or inspect cell styles with `buffer-get`
+5. Assert on text content or style properties
+
+See `janet/test/test-snapshot.janet` — it is the canonical example for snapshot testing and covers layout, spacing, word wrapping, row backgrounds, color themes, and combined inspect+render assertions.
+
+### Mandatory: run tests after every feature
+
+After implementing any feature or bug fix, always run the full test suite:
+
+```sh
+janet janet/test/run.janet
+```
+
+Fix all failures before considering the work done. Do not skip this step.
+
 ### Rust tests
 
 ```sh
