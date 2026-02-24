@@ -5,8 +5,8 @@
 (print "── tui/style ──")
 
 (t/test "style-default is empty" (fn []
-  (t/assert= style-default (struct))
-  (t/assert= (style->sgr style-default) "")))
+  (t/assert= (style->sgr style-default) "")
+  (t/assert= (style-default :_sgr) "")))
 
 (t/test "style creates struct" (fn []
   (def s (style :fg :red :bold true))

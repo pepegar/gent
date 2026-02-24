@@ -56,40 +56,10 @@
 
 # ── Style construction ────────────────────────────────────────
 
-(defn style
-  "Create a style struct. All keys are optional.
-   Supported keys: :fg :bg :bold :dim :italic :underline :reversed"
-  [& args]
-  (struct ;args))
-
-(def style-default
-  "Empty style that changes nothing."
-  (struct))
-
-(defn style-merge
-  "Merge two styles. Values in `over` override those in `base`.
-   nil values in `over` do NOT override (they are skipped)."
-  [base over]
-  (def entries @[])
-  (def all-keys @{})
-  (when base
-    (eachp [k _] base (put all-keys k true)))
-  (when over
-    (eachp [k _] over (put all-keys k true)))
-  (eachp [k _] all-keys
-    (def v (if (and over (not (nil? (get over k))))
-             (get over k)
-             (get base k)))
-    (when (not (nil? v))
-      (array/push entries k)
-      (array/push entries v)))
-  (struct ;entries))
-
-(defn style->sgr
-  "Convert a style to an ANSI SGR escape sequence string.
-   Returns empty string for nil/empty styles."
+(defn- style->sgr-raw
+  "Compute the ANSI SGR escape sequence string from style keys."
   [s]
-  (if (or (nil? s) (= s style-default))
+  (if (or (nil? s) (= 0 (length s)))
     ""
     (do
       (def codes @[])
@@ -105,3 +75,53 @@
       (if (empty? codes)
         ""
         (string "\x1b[" (string/join codes ";") "m")))))
+
+(defn style
+  "Create a style struct. All keys are optional.
+   Supported keys: :fg :bg :bold :dim :italic :underline :reversed"
+  [& args]
+  (def raw (struct ;args))
+  (struct ;args :_sgr (style->sgr-raw raw)))
+
+(def style-default
+  "Empty style that changes nothing."
+  (struct :_sgr ""))
+
+(defn style-merge
+  "Merge two styles. Values in `over` override those in `base`.
+   nil values in `over` do NOT override (they are skipped)."
+  [base over]
+  (def entries @[])
+  (def all-keys @{})
+  (when base
+    (eachp [k _] base (when (not= k :_sgr) (put all-keys k true))))
+  (when over
+    (eachp [k _] over (when (not= k :_sgr) (put all-keys k true))))
+  (eachp [k _] all-keys
+    (def v (if (and over (not (nil? (get over k))))
+             (get over k)
+             (get base k)))
+    (when (not (nil? v))
+      (array/push entries k)
+      (array/push entries v)))
+  (def merged (struct ;entries))
+  (struct ;entries :_sgr (style->sgr-raw merged)))
+
+(defn style->sgr
+  "Convert a style to an ANSI SGR escape sequence string.
+   Returns the precomputed :_sgr when present."
+  [s]
+  (if (nil? s)
+    ""
+    (if-let [cached (get s :_sgr)]
+      cached
+      (style->sgr-raw s))))
+
+(defn style=
+  "Fast style equality. Compares precomputed SGR strings first."
+  [a b]
+  (cond
+    (and (nil? a) (nil? b)) true
+    (or (nil? a) (nil? b)) false
+    (= (get a :_sgr) (get b :_sgr)) true
+    false))
