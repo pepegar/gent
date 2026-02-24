@@ -87,15 +87,15 @@ Widget rendering is verified with buffer snapshot tests. The pattern:
 
 See `janet/test/test-snapshot.janet` — it is the canonical example for snapshot testing and covers layout, spacing, word wrapping, row backgrounds, color themes, and combined inspect+render assertions.
 
-### Mandatory: run tests after every feature
+### Mandatory: verify build and tests after every change
 
-After implementing any feature or bug fix, always run the full test suite:
+After implementing any feature, bug fix, or modification, always verify that the project compiles and all tests pass:
 
 ```sh
-janet janet/test/run.janet
+cargo build && janet janet/test/run.janet
 ```
 
-Fix all failures before considering the work done. Do not skip this step.
+Fix all compilation errors and test failures before considering the work done. Do not skip this step.
 
 ### Rust tests
 

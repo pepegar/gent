@@ -15,6 +15,7 @@
 (import core/conversation :as conv)
 (import core/commands :as commands)
 (import core/registers :as reg)
+(import core/profile :as profile)
 
 # Built-in tools
 (import tools/read-file)
@@ -28,6 +29,7 @@
 (import commands/conversation)
 (import commands/auth)
 (import commands/introspection)
+(import commands/profile)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)

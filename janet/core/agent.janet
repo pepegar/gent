@@ -26,6 +26,7 @@
 (import widgets/editor :as editor-w)
 (import widgets/separator :as sep)
 (import core/completion :as completion)
+(import core/profile :as profile)
 
 # ── Layout ─────────────────────────────────────────────────────
 
@@ -91,7 +92,8 @@
       (each name (widget/list-widgets)
         (when-let [w (widget/get-widget name)]
           (when (and (w :rect) (w :render))
-            ((w :render) w (w :rect) buf)
+            (profile/with-span (string "render:" (string name)) "render"
+              (fn [] ((w :render) w (w :rect) buf)))
             (put w :dirty false))))
       (term/write (tui/buffer->str buf))
       (set prev-buf buf))
@@ -104,7 +106,8 @@
             (def r (w :rect))
             # Render into a small buffer covering just this widget's rect
             (def small-buf (tui/buffer r))
-            ((w :render) w r small-buf)
+            (profile/with-span (string "render:" (string name)) "render"
+              (fn [] ((w :render) w r small-buf)))
             (put w :dirty false)
             # Diff this rect between prev-buf and small-buf, emit changes
             (def parts @[])
@@ -275,11 +278,13 @@
 
     # ── The reactor loop ───────────────────────────────────────
     (while true
+      (profile/with-span "reactor:loop" "reactor" (fn []
+
       # 1. Determine poll timeout
       (def timeout (if (chat/active?) 16 nil))
 
       # 2. Poll terminal event
-      (def ev (term/read-event timeout))
+      (def ev (profile/with-span "event:poll" "io" (fn [] (term/read-event timeout))))
 
       # 3. Handle terminal event
       (when ev
@@ -287,9 +292,9 @@
         (cond
           (= :resize ev-type)
           # Resize — refresh layout, full redraw
-          (do
+          (profile/with-span "event:resize" "event" (fn []
             (refresh-and-layout)
-            (widget/mark-all-dirty))
+            (widget/mark-all-dirty)))
 
           (= :scroll ev-type)
           # Mouse scroll → coalesce all pending scroll events into one batch
@@ -299,11 +304,14 @@
             (while (and next (= :scroll (get next :type)))
               (if (= :up (get next :direction)) (++ scroll-delta) (-- scroll-delta))
               (set next (term/read-event 0)))
-            # Apply the accumulated delta as a single dispatch
-            (when (> scroll-delta 0)
-              (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta}))
-            (when (< scroll-delta 0)
-              (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)}))
+            (profile/with-span-meta "event:scroll" "event"
+              @{:coalesced (math/abs scroll-delta)}
+              (fn []
+                # Apply the accumulated delta as a single dispatch
+                (when (> scroll-delta 0)
+                  (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta}))
+                (when (< scroll-delta 0)
+                  (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)}))))
             # If we read a non-scroll event, handle it next iteration
             # by pushing it back — but term has no pushback, so handle inline
             (when next
@@ -318,7 +326,7 @@
           # All other events → editor widget
           # Batch key events for paste performance: drain all pending
           # key events before rendering, like we do for scroll events.
-          (do
+          (profile/with-span "event:key" "event" (fn []
             (editor/batch-begin)
             (var result (widget/dispatch :editor ev))
             (var leftover nil)
@@ -384,13 +392,13 @@
               (widget/dispatch :chat {:type :scroll-line-down})
 
               (= result :rerender)
-              (force-rerender)))))
+              (force-rerender))))))
 
       # 4. Update all widgets (chat drains stream, polls tools)
-      (widget/update-all)
+      (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
 
       # 5. Tick widget timers
-      (widget/tick-timers)
+      (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
 
       # 6. Re-layout if editor height changed
       (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
@@ -398,4 +406,6 @@
         (widget/mark-all-dirty))
 
       # 7. Render frame (diff-based)
-      (render-frame))))
+      (profile/with-span "render:frame" "render" (fn [] (render-frame)))
+
+      )))))  # close fn, with-span, while, defer, defn

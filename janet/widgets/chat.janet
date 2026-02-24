@@ -17,6 +17,9 @@
 (import core/skills :as skills)
 (import core/widget :as widget)
 (import tui)
+(import core/profile :as profile)
+
+(var- stream-span-id nil)
 
 # ── System prompt ──────────────────────────────────────────────
 
@@ -627,6 +630,7 @@
   (hooks/run :before-send conversation)
   (stream-start-output)
   (spinner-start "thinking…")
+  (set stream-span-id (profile/begin "stream:api-call" "stream"))
   (def ctx
     (api/stream-start
       conversation
@@ -643,22 +647,23 @@
   (set mode :streaming))
 
 (defn- drain-stream []
-  (def parser (stream-ctx :parser))
-  (def stream-id (get stream-ctx :stream-id))
-  (var result nil)
-  (var keep-going true)
-  (var budget 32)
-  (while (and keep-going (> budget 0))
-    (-- budget)
-    (def line (http/stream-read stream-id))
-    (cond
-      (nil? line) (set keep-going false)
-      (= :done line) (do (set result :done) (set keep-going false))
-      (and (table? line) (= :error (get line :type)))
-      (do (output-error (string "Stream error: " (get line :message "unknown")))
-          (set result :error) (set keep-going false))
-      (string? line) ((parser :feed) line)))
-  result)
+  (profile/with-span "stream:drain" "stream" (fn []
+    (def parser (stream-ctx :parser))
+    (def stream-id (get stream-ctx :stream-id))
+    (var result nil)
+    (var keep-going true)
+    (var budget 32)
+    (while (and keep-going (> budget 0))
+      (-- budget)
+      (def line (http/stream-read stream-id))
+      (cond
+        (nil? line) (set keep-going false)
+        (= :done line) (do (set result :done) (set keep-going false))
+        (and (table? line) (= :error (get line :type)))
+        (do (output-error (string "Stream error: " (get line :message "unknown")))
+            (set result :error) (set keep-going false))
+        (string? line) ((parser :feed) line)))
+    result)))
 
 # ── Tool execution ─────────────────────────────────────────────
 
@@ -760,6 +765,8 @@
               (set keep-going true))))))))
 
 (defn- handle-stream-done []
+  (profile/end stream-span-id)
+  (set stream-span-id nil)
   (stream-end-output)
   (spinner-stop)
   (def parser (stream-ctx :parser))
