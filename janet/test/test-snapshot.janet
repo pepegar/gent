@@ -506,5 +506,84 @@
   (t/assert-truthy (any-row-contains? rows-back-bottom "message 14"))
   (t/assert= (chat/get-scroll-offset) 0)))
 
+# ── Human-readable tool rendering ────────────────────────────
+
+(t/test "snapshot: render-tool-call bash shows $ prefix" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "bash" @{:command "cargo build"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "Bash"))
+  (t/assert-truthy (any-row-contains? rows "$ cargo build"))))
+
+(t/test "snapshot: render-tool-call read_file shows Read header" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "read_file" @{:path "janet/boot.janet"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "Read"))
+  (t/assert-truthy (any-row-contains? rows "janet/boot.janet"))))
+
+(t/test "snapshot: render-tool-call list_files shows List header" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "list_files" @{:path "janet/tools/"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "List"))
+  (t/assert-truthy (any-row-contains? rows "janet/tools/"))))
+
+(t/test "snapshot: render-tool-call use_skill shows Skill header" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "use_skill" @{:name "commit"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "Skill"))
+  (t/assert-truthy (any-row-contains? rows "commit"))))
+
+(t/test "snapshot: render-tool-call prompt_user shows Ask header" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "prompt_user" @{:type "confirm" :title "Continue?"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "Ask"))
+  (t/assert-truthy (any-row-contains? rows "Continue?"))))
+
+(t/test "snapshot: render-tool-call unknown tool falls through to generic" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-call "some_custom_tool" @{:foo "bar"})
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "some_custom_tool"))))
+
+(t/test "snapshot: bash result hides exit code 0" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-result "bash" "exit code: 0\nstdout:\nall good\nstderr:\n")
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "all good"))
+  (t/assert-falsy (any-row-contains? rows "exit"))))
+
+(t/test "snapshot: bash result shows non-zero exit code" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-result "bash" "exit code: 1\nstdout:\nstderr:\nerror: not found\n")
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "exit 1"))
+  (t/assert-truthy (any-row-contains? rows "error: not found"))))
+
+(t/test "snapshot: read_file result has line numbers" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-result "read_file" "first line\nsecond line\nthird line")
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "1"))
+  (t/assert-truthy (any-row-contains? rows "first line"))
+  (t/assert-truthy (any-row-contains? rows "second line"))))
+
+(t/test "snapshot: read_file error falls through to error display" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-result "read_file" "Error: file not found: missing.txt")
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "Error: file not found"))))
+
+(t/test "snapshot: bash result with only stdout" (fn []
+  (def w (setup 60 10))
+  (chat/render-tool-result "bash" "exit code: 0\nstdout:\nhello world\nstderr:\n")
+  (def rows (render-chat w 60 10))
+  (t/assert-truthy (any-row-contains? rows "hello world"))
+  (t/assert-falsy (any-row-contains? rows "stdout"))
+  (t/assert-falsy (any-row-contains? rows "stderr"))))
+
 (def pass (t/pass))
 (def fail (t/fail))

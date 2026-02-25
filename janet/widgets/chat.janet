@@ -247,6 +247,8 @@
       :tool-row-bg     (tui/style :bg [:rgb 34 52 52])              # Green-tinted Surface0
       :tool-success-bg (tui/style :bg [:rgb 30 56 44])              # Deeper green
       :tool-error-bg   (tui/style :bg [:rgb 62 30 44])              # Deeper red
+      :bash-exit-fail  (tui/style :fg [:rgb 243 139 168] :bold true) # Red (same as error-label)
+      :bash-prompt     (tui/style :fg [:rgb 166 227 161])            # Green (dimmer than label)
       :reset        (tui/style)}
 
     :light
@@ -269,6 +271,8 @@
       :tool-row-bg     (tui/style :bg [:rgb 222 238 224])           # Green-tinted Mantle
       :tool-success-bg (tui/style :bg [:rgb 218 240 222])           # Deeper green
       :tool-error-bg   (tui/style :bg [:rgb 246 218 224])           # Deeper red
+      :bash-exit-fail  (tui/style :fg [:rgb 210 15 57] :bold true)   # Red (same as error-label)
+      :bash-prompt     (tui/style :fg [:rgb 64 160 43])              # Green (dimmer than label)
       :reset        (tui/style)}})
 
 (def- colors
@@ -593,6 +597,104 @@
   (if renderer (put tool-result-renderers name renderer)
     (put tool-result-renderers name nil)))
 
+# ── Human-readable tool-call headers ─────────────────────────
+
+(defn output-read-file [input]
+  (def path (get input :path ""))
+  (output-tool "Read" path))
+
+(defn output-bash [input]
+  (def cmd (get input :command ""))
+  (push-raw-line
+    @[@{:text "   ▸ Bash" :style (colors :tool-label)}
+      @{:text "  $ " :style (colors :bash-prompt)}
+      @{:text cmd :style (colors :separator)}])
+  (put (last scrollback) :row-style :tool-row-bg))
+
+(defn output-list-files [input]
+  (def path (or (get input :path) "."))
+  (output-tool "List" path))
+
+(defn output-use-skill [input]
+  (def skill-name (get input :name ""))
+  (output-tool "Skill" skill-name))
+
+(defn output-prompt-user [input]
+  (def title (get input :title ""))
+  (output-tool "Ask" title))
+
+# ── Human-readable tool-result renderers ─────────────────────
+
+(defn output-bash-result [text]
+  "Parse bash result (exit code: N\\nstdout:\\n...\\nstderr:\\n...) and render structured output."
+  (def lines (string/split "\n" text))
+  (var exit-code 0)
+  (var section nil)
+  (def stdout-lines @[])
+  (def stderr-lines @[])
+
+  (each line lines
+    (cond
+      (string/has-prefix? "exit code: " line)
+      (set exit-code (or (scan-number (string/slice line 11)) 0))
+
+      (= "stdout:" line) (set section :stdout)
+      (= "stderr:" line) (set section :stderr)
+
+      (= section :stdout) (array/push stdout-lines line)
+      (= section :stderr) (array/push stderr-lines line)))
+
+  # Trim trailing empty lines
+  (while (and (> (length stdout-lines) 0) (= "" (last stdout-lines)))
+    (array/pop stdout-lines))
+  (while (and (> (length stderr-lines) 0) (= "" (last stderr-lines)))
+    (array/pop stderr-lines))
+
+  (def success (= 0 exit-code))
+  (def row-bg (if success :tool-success-bg :tool-error-bg))
+
+  # Show exit code only on failure
+  (when (not success)
+    (push-raw-line
+      @[@{:text (string "         ✗ exit " exit-code) :style (colors :bash-exit-fail)}])
+    (put (last scrollback) :row-style row-bg))
+
+  # Show stdout (combine with stderr if both present)
+  (def all-lines (array/concat @[] stdout-lines stderr-lines))
+  (def total (length all-lines))
+  (def show-n (min total tool-result-max-lines))
+  (for i 0 show-n
+    (push-line (string "         " (get all-lines i "")) (colors :separator))
+    (put (last scrollback) :row-style row-bg))
+  (when (> total tool-result-max-lines)
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
+    (put (last scrollback) :row-style row-bg)))
+
+(defn output-read-file-result [result]
+  "Render read_file result with line numbers."
+  (def text (if (or (table? result) (array? result) (tuple? result))
+              (break (output-tool-result
+                       (string "[Image: " (get-in result [:source :media_type] "unknown") "]")))
+              (string result)))
+  (def is-error (and (string? text) (string/has-prefix? "Error" text)))
+  (when is-error
+    (break (output-tool-result text false)))
+  (def lines (string/split "\n" text))
+  (def total (length lines))
+  (def show-n (min total tool-result-max-lines))
+  (def num-width (max 2 (length (string total))))
+  (for i 0 show-n
+    (def linenum (string/format (string "%" num-width "d") (+ i 1)))
+    (def code-line (get lines i ""))
+    (push-raw-line
+      @[@{:text (string "         " linenum " ") :style (colors :eval-linenum)}
+        @{:text "│" :style (colors :eval-border)}
+        @{:text (string " " code-line) :style (colors :separator)}])
+    (put (last scrollback) :row-style :tool-success-bg))
+  (when (> total tool-result-max-lines)
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines") (colors :separator))
+    (put (last scrollback) :row-style :tool-success-bg)))
+
 (defn render-tool-call [name input]
   (when (> (length scrollback) 0) (push-line ""))
   (def custom (get tool-renderers name))
@@ -601,19 +703,27 @@
     (cond
       (= "eval_janet" name) (output-eval-janet (get input :code ""))
       (= "edit_file" name) (output-edit-file input)
+      (= "read_file" name) (output-read-file input)
+      (= "bash" name) (output-bash input)
+      (= "list_files" name) (output-list-files input)
+      (= "use_skill" name) (output-use-skill input)
+      (= "prompt_user" name) (output-prompt-user input)
       (output-tool name (json/encode input)))))
 
 (defn render-tool-result [name result]
   (def custom (get tool-result-renderers name))
   (if custom
     (custom result)
-    (do
-      (def text (if (or (table? result) (array? result) (tuple? result))
-                  (string "[Image: " (get-in result [:source :media_type] "unknown") "]")
-                  (string result)))
-      (def is-error (and (string? text)
-                         (string/has-prefix? "Error" text)))
-      (output-tool-result text (not is-error)))))
+    (cond
+      (= "bash" name) (output-bash-result (string result))
+      (= "read_file" name) (output-read-file-result result)
+      (do
+        (def text (if (or (table? result) (array? result) (tuple? result))
+                    (string "[Image: " (get-in result [:source :media_type] "unknown") "]")
+                    (string result)))
+        (def is-error (and (string? text)
+                           (string/has-prefix? "Error" text)))
+        (output-tool-result text (not is-error))))))
 
 (defn output-eval [code result]
   "Display an inline Janet eval."
