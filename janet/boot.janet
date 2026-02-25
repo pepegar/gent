@@ -90,13 +90,20 @@
 # Stash loaded config paths for the startup banner
 (reg/set :loaded-configs loaded-configs)
 
-# Start the agent — optionally in stage mode
+# Start the agent — headless, stage, or interactive (with optional RPC)
+(def- rpc-port (dyn :gent/port))
+
 (import core/stage :as stage)
-(def stage-script (os/getenv "GENT_STAGE"))
-(if stage-script
+(import core/headless :as headless)
+
+(if (dyn :gent/headless)
+  (headless/run (or rpc-port 7888))
   (do
-    (stage/install)
-    (when (and (not= stage-script "1") (os/stat stage-script))
-      (dofile stage-script))
-    (agent/run))
-  (agent/run))
+    (def stage-script (os/getenv "GENT_STAGE"))
+    (if stage-script
+      (do
+        (stage/install)
+        (when (and (not= stage-script "1") (os/stat stage-script))
+          (dofile stage-script))
+        (agent/run rpc-port))
+      (agent/run rpc-port))))

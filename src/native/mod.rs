@@ -1,6 +1,7 @@
 mod buffer;
 mod http;
 mod json;
+mod net;
 mod process;
 mod task;
 mod term;
@@ -12,6 +13,7 @@ use janetrs::client::JanetClient;
 pub fn register(client: &mut JanetClient) {
     term::register(client);
     http::register(client);
+    net::register(client);
     process::register(client);
     json::register(client);
     task::register(client);

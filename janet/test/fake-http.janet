@@ -199,6 +199,89 @@
         (put dr i false))))
   (string ;parts))
 
+# ── Net mocks ─────────────────────────────────────────────────
+
+(var- net-listeners @{})
+(var- net-connections @{})
+(var- next-listener-id 1)
+(var- next-conn-id 1)
+(var- net-accept-queue @{})
+(var- net-read-queues @{})
+
+(defn net-reset []
+  (set net-listeners @{})
+  (set net-connections @{})
+  (set next-listener-id 1)
+  (set next-conn-id 1)
+  (set net-accept-queue @{})
+  (set net-read-queues @{}))
+
+(defn net-inject-connection [listener-id &opt lines]
+  "Simulate a client connecting. Returns conn-id.
+   Optionally queue lines to be read from the connection."
+  (def conn-id next-conn-id)
+  (++ next-conn-id)
+  (put net-connections conn-id @{:write-buf @[] :open true})
+  (when (nil? (get net-accept-queue listener-id))
+    (put net-accept-queue listener-id @[]))
+  (array/push (get net-accept-queue listener-id) conn-id)
+  (when lines
+    (put net-read-queues conn-id (array/slice lines)))
+  conn-id)
+
+(defn net-get-writes [conn-id]
+  "Return everything written to a mock connection."
+  (if-let [conn (get net-connections conn-id)]
+    (get conn :write-buf)
+    @[]))
+
+(defn net-queue-read [conn-id line]
+  "Queue a line to be read from a mock connection."
+  (when (nil? (get net-read-queues conn-id))
+    (put net-read-queues conn-id @[]))
+  (array/push (get net-read-queues conn-id) line))
+
+(defn- mock-net-listen [port]
+  (def id next-listener-id)
+  (++ next-listener-id)
+  (put net-listeners id @{:port port})
+  id)
+
+(defn- mock-net-accept [listener-id &opt timeout-ms]
+  (def q (get net-accept-queue listener-id))
+  (if (and q (not (empty? q)))
+    (do (def conn-id (first q))
+        (array/remove q 0)
+        conn-id)
+    nil))
+
+(defn- mock-net-read-line [conn-id]
+  (def conn (get net-connections conn-id))
+  (when (or (nil? conn) (not (get conn :open)))
+    (break :closed))
+  (def q (get net-read-queues conn-id))
+  (if (and q (not (empty? q)))
+    (do (def line (first q))
+        (array/remove q 0)
+        (if (= line :closed) :closed line))
+    nil))
+
+(defn- mock-net-write [conn-id data]
+  (def conn (get net-connections conn-id))
+  (when (or (nil? conn) (not (get conn :open)))
+    (break false))
+  (array/push (get conn :write-buf) data)
+  true)
+
+(defn- mock-net-close [conn-id]
+  (when-let [conn (get net-connections conn-id)]
+    (put conn :open false))
+  nil)
+
+(defn- mock-net-close-listener [listener-id]
+  (put net-listeners listener-id nil)
+  nil)
+
 # ── Install ────────────────────────────────────────────────────
 
 (defn install
@@ -221,4 +304,10 @@
   (install-mock env "term/suspend" mock-term-suspend)
   (install-mock env "process/exec" mock-process-exec)
   (install-mock env "buffer/diff" mock-buffer-diff)
+  (install-mock env "net/listen" mock-net-listen)
+  (install-mock env "net/accept" mock-net-accept)
+  (install-mock env "net/read-line" mock-net-read-line)
+  (install-mock env "net/write" mock-net-write)
+  (install-mock env "net/close" mock-net-close)
+  (install-mock env "net/close-listener" mock-net-close-listener)
   nil)

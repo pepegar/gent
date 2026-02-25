@@ -28,6 +28,7 @@
 (import core/completion :as completion)
 (import core/dialog :as dialog)
 (import core/profile :as profile)
+(import core/rpc-server :as rpc-srv)
 
 # ── Layout ─────────────────────────────────────────────────────
 
@@ -287,8 +288,8 @@
 # ── Reactor ────────────────────────────────────────────────────
 
 (defn run
-  "Main reactor loop."
-  []
+  "Main reactor loop. Optional rpc-port starts a JSON-RPC server alongside the TUI."
+  [&opt rpc-port]
   # Set up TUI — alternate screen, raw mode (no mouse capture)
   (term/enable-raw-mode)
   (term/write "\x1b[?1049h")  # enter alternate screen buffer
@@ -345,6 +346,15 @@
     # Load cross-session input history
     (ih/init (conv/project-sessions-dir))
 
+    # Optional RPC server (when --port is specified without --headless)
+    (var rpc-server nil)
+    (when rpc-port
+      (def srv (rpc-srv/start rpc-port))
+      (when srv
+        (rpc-srv/install-hooks srv)
+        (chat/output-info (string "  rpc: listening on port " rpc-port))
+        (set rpc-server srv)))
+
     # Initial render
     (widget/mark-all-dirty)
     (render-frame)
@@ -355,7 +365,14 @@
       (profile/with-span "reactor:loop" "reactor" (fn []
 
       # 1. Determine poll timeout
-      (def timeout (if (chat/active?) 16 nil))
+      # Use short timeout when active or when RPC clients are connected
+      # so we don't block on terminal events and starve TCP reads.
+      (def timeout
+        (cond
+          (chat/active?) 16
+          (and rpc-server (rpc-srv/has-clients? rpc-server)) 50
+          rpc-server 100
+          nil))
 
       # 2. Poll terminal event
       (def ev (profile/with-span "event:poll" "io" (fn [] (term/read-event timeout))))
@@ -527,18 +544,34 @@
               (= result :rerender)
               (force-rerender))))))
 
-      # 4. Update all widgets (chat drains stream, polls tools)
+      # 4. Poll RPC server (accept connections, process requests)
+      (when rpc-server
+        (rpc-srv/poll-and-dispatch rpc-server)
+        (rpc-srv/check-mode-change rpc-server)
+        (rpc-srv/flush rpc-server)
+        (when (rpc-srv/shutdown-requested? rpc-server)
+          (chat/cleanup)
+          (set should-quit true)
+          (break)))
+
+      # 5. Update all widgets (chat drains stream, polls tools)
       (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
 
-      # 5. Tick widget timers
+      # 6. Tick widget timers
       (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
 
-      # 6. Re-layout if editor height changed
+      # 7. Re-layout if editor height changed
       (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
         (refresh-and-layout)
         (widget/mark-all-dirty))
 
-      # 7. Render frame (diff-based)
+      # 8. Render frame (diff-based)
       (profile/with-span "render:frame" "render" (fn [] (render-frame)))
 
-      )))))  # close fn, with-span, while, defer, defn
+      )))
+
+    # Cleanup RPC server if started
+    (when rpc-server
+      (rpc-srv/stop rpc-server))
+
+    ))  # close defer, defn

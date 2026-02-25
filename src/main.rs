@@ -58,6 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let mut load_files: Vec<String> = Vec::new();
     let mut no_init = false;
+    let mut headless = false;
+    let mut port: Option<u16> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -71,6 +73,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "-q" | "--no-init-file" => { no_init = true; i += 1; }
+            "--headless" => { headless = true; i += 1; }
+            "--port" => {
+                if i + 1 < args.len() {
+                    port = Some(args[i + 1].parse().unwrap_or_else(|_| {
+                        eprintln!("error: --port requires a number");
+                        std::process::exit(1);
+                    }));
+                    i += 2;
+                } else {
+                    eprintln!("error: --port requires a number argument");
+                    std::process::exit(1);
+                }
+            }
             _ => { i += 1; }
         }
     }
@@ -96,6 +111,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|f| format!("\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\"")))
             .collect::<Vec<_>>().join(" ");
         client.run(format!(r#"(setdyn :gent/load-files @[{}])"#, janet_array))?;
+    }
+    if headless {
+        client.run(r#"(setdyn :gent/headless true)"#)?;
+    }
+    if let Some(p) = port {
+        client.run(format!(r#"(setdyn :gent/port {})"#, p))?;
     }
 
     // Load and run boot.janet — from here, Janet takes over

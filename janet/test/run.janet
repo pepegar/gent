@@ -39,7 +39,9 @@
    "test/test-scenario"
    "test/test-thinking"
    "test/test-editor-scroll"
-   "test/test-dialog"])
+   "test/test-dialog"
+   "test/test-rpc"
+   "test/test-headless"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native
