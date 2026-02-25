@@ -173,10 +173,12 @@
   ``Create a new SSE stream parser.
 
   callbacks: a table of callback functions:
-    :on-text      (fn [text])           — called with each text delta
-    :on-thinking  (fn [text])           — called with each thinking delta (optional)
-    :on-tool-use  (fn [id name input])  — called when a tool_use block is complete
-    :on-error     (fn [err])            — called on error
+    :on-text        (fn [text])           — called with each text delta
+    :on-thinking    (fn [text])           — called with each thinking delta (optional)
+    :on-tool-start  (fn [name])           — called when a tool_use block starts streaming
+    :on-tool-delta  (fn [name nbytes])    — called on each input_json_delta with accumulated size
+    :on-tool-use    (fn [id name input])  — called when a tool_use block is complete
+    :on-error       (fn [err])            — called on error
 
   Returns a parser table with :feed and :finish methods.
   ``
@@ -226,7 +228,9 @@
           (when (= "tool_use" current-block-type)
             (set current-tool-id (get block :id))
             (set current-tool-name (get block :name))
-            (buffer/clear current-input-json))
+            (buffer/clear current-input-json)
+            (when-let [cb (get callbacks :on-tool-start)]
+              (cb current-tool-name)))
           (when (= "text" current-block-type)
             (buffer/clear text-accum))
           (when (= "thinking" current-block-type)
@@ -261,7 +265,9 @@
             "input_json_delta"
             (do
               (def partial (get delta :partial_json ""))
-              (buffer/push current-input-json partial))))
+              (buffer/push current-input-json partial)
+              (when-let [cb (get callbacks :on-tool-delta)]
+                (cb current-tool-name (length current-input-json))))))
 
         # content_block_stop — block is complete
         "content_block_stop"

@@ -895,6 +895,15 @@
           (stream-delta text))
         :on-thinking (fn [text]
           (thinking-delta text))
+        :on-tool-start (fn [name]
+          (stream-end-output)
+          (spinner-start (string "streaming " name " arguments…")))
+        :on-tool-delta (fn [name nbytes]
+          (def size-str
+            (if (>= nbytes 1024)
+              (string/format "%.1fKB" (/ nbytes 1024))
+              (string nbytes "B")))
+          (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
         :on-error (fn [err]
           (spinner-stop)
           (output-error (string "Stream error: " err))
