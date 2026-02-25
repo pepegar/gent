@@ -3,8 +3,8 @@
 #
 # Configuration priority for API keys:
 #   1. Explicit set-api-key (runtime override via auth module)
-#   2. auth.json credential (API key or OAuth token, via auth module)
-#   3. GENT_API_KEY environment variable
+#   2. GENT_API_KEY environment variable (explicit session override)
+#   3. auth.json credential (API key or OAuth token, via auth module)
 #   4. ANTHROPIC_API_KEY environment variable
 #   5. Auth module fallback resolver
 #
@@ -64,19 +64,24 @@
         "****")))
   result)
 
+(defn- using-custom-url? []
+  "Check if the API URL is overridden (not the default Anthropic endpoint)."
+  (not= (config :url) (defaults :url)))
+
 (defn- resolve-api-key []
   "Resolve the API key from all sources. Throws if none found."
   # 1. Explicit config (already registered as runtime override in auth)
   (when (config :api-key)
     (break (config :api-key)))
 
-  # 2-5. Auth module handles the full resolution chain
-  (def key (auth/get-api-key "anthropic"))
-  (when key (break key))
-
-  # Legacy fallback: check GENT_API_KEY directly (in case auth module doesn't know about it)
+  # 2. GENT_API_KEY — explicit env var for this session, takes priority over stored credentials.
+  #    This is critical when using a custom API URL (e.g. LiteLLM) alongside stored Anthropic OAuth tokens.
   (def gent-key (os/getenv "GENT_API_KEY"))
   (when gent-key (break gent-key))
+
+  # 3-5. Auth module handles the full resolution chain (auth.json, ANTHROPIC_API_KEY, fallback)
+  (def key (auth/get-api-key "anthropic"))
+  (when key (break key))
 
   (error (string "No API key found. Options:\n"
                   "  • /login anthropic     — OAuth login (Claude Pro/Max subscription)\n"
@@ -84,23 +89,34 @@
                   "  • (api/set-api-key k)  — set in init.janet")))
 
 (defn- oauth-token? []
-  "Check if the current credential is an OAuth token."
+  "Check if the current credential is an OAuth token.
+   Returns false when using a custom URL — OAuth tokens are Anthropic-specific."
+  (when (using-custom-url?) (break false))
+  (when (config :api-key) (break false))
+  (when (os/getenv "GENT_API_KEY") (break false))
   (def cred (auth/get-credential "anthropic"))
   (and cred (= "oauth" (get cred "type"))))
 
 (defn- build-headers []
   (def api-key (resolve-api-key))
   (def is-oauth (oauth-token?))
+  (def custom-url (using-custom-url?))
   (def headers
     @{"content-type" "application/json"
       "anthropic-version" "2023-06-01"})
-  (if is-oauth
+  (cond
+    is-oauth
     (do
       (put headers "authorization" (string "Bearer " api-key))
       (put headers "anthropic-beta" "claude-code-20250219,oauth-2025-04-20")
       (put headers "anthropic-dangerous-direct-browser-access" "true")
       (put headers "user-agent" "claude-cli/2.1.2 (external, cli)")
       (put headers "x-app" "cli"))
+
+    custom-url
+    (put headers "authorization" (string "Bearer " api-key))
+
+    # Default Anthropic API with API key
     (put headers "x-api-key" api-key))
   headers)
 
