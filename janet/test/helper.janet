@@ -7,9 +7,17 @@
 
 (var- pass-count 0)
 (var- fail-count 0)
+(var- test-count 0)
 
 (defn pass [] pass-count)
 (defn fail [] fail-count)
+(defn tests [] test-count)
+
+(defn reset []
+  "Reset all counters. Called by the runner between test files."
+  (set pass-count 0)
+  (set fail-count 0)
+  (set test-count 0))
 
 (defn assert=
   "Assert two values are equal. Returns true/false."
@@ -41,6 +49,7 @@
 (defn test
   "Run a named test."
   [name f]
+  (++ test-count)
   (def before-fail fail-count)
   (try
     (f)

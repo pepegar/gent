@@ -54,7 +54,9 @@
   (set env (table/getproto env)))
 (fake/install env)
 
-(var- total-pass 0)
+(import test/helper :as t)
+
+(var- total-tests 0)
 (var- total-fail 0)
 (var- total-error 0)
 
@@ -62,17 +64,16 @@
   (def path (string janet-dir "/" mod ".janet"))
   (try
     (do
-      (def env (dofile path))
-      (def pass (or (get-in env ['pass :value]) 0))
-      (def fail (or (get-in env ['fail :value]) 0))
-      (+= total-pass pass)
-      (+= total-fail fail))
+      (t/reset)
+      (dofile path)
+      (+= total-tests (t/tests))
+      (+= total-fail (t/fail)))
     ([err]
       (eprintf "ERROR loading %s: %s" mod (string err))
       (++ total-error))))
 
 (print)
-(printf "═══ Results: %d passed, %d failed, %d errors ═══"
-        total-pass total-fail total-error)
+(printf "═══ Results: %d tests, %d failed, %d errors ═══"
+        total-tests total-fail total-error)
 (when (or (> total-fail 0) (> total-error 0))
   (os/exit 1))

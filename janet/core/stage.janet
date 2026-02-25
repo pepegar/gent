@@ -125,6 +125,13 @@
       (array/push lines (sse-line @{:type "message_stop"}))
       (array/push lines "data: [DONE]"))
 
+    (= gtype :error)
+    (do
+      (array/push lines (sse-line @{:type "error"
+                                     :error @{:type "api_error"
+                                              :message (gen :content)}}))
+      (array/push lines "data: [DONE]"))
+
     (= gtype :custom)
     (do
       (def custom-lines ((gen :function) (gen :conversation)))
@@ -153,6 +160,10 @@
   "Generate a response with thinking followed by text."
   @{:type :thinking-then-text :thinking thinking-content :content text-content
     :delay (if (nil? delay) 0 delay)})
+
+(defn error [message &named delay]
+  "Generate an API error response."
+  @{:type :error :content message :delay (if (nil? delay) 0 delay)})
 
 (defn custom [f]
   "Custom generator: (fn [conversation] ...) returns SSE lines."
