@@ -10,6 +10,7 @@
 
 (import widgets/chat :as chat)
 (import core/widget :as widget)
+(import core/conversation :as conv)
 (import tui)
 (import test/helper :as t)
 
@@ -265,6 +266,21 @@
 (t/test "active? is false when idle" (fn []
   (setup)
   (t/assert-falsy (chat/active?))))
+
+(t/test "conversation clear hook clears scrollback" (fn []
+  (setup)
+  # Add some content to scrollback
+  (chat/output-user "hello")
+  (chat/output-agent "hi there")
+  (def scrollback-before (length (chat/get-scrollback)))
+  (t/assert-truthy (> scrollback-before 0))
+  
+  # Clear the conversation (this should trigger the hook)
+  (conv/clear)
+  
+  # Verify scrollback is cleared
+  (def scrollback-after (length (chat/get-scrollback)))
+  (t/assert= 0 scrollback-after)))
 
 (def pass (t/pass))
 (def fail (t/fail))

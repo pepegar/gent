@@ -1284,6 +1284,10 @@
 # ── Widget constructor ─────────────────────────────────────────
 
 (defn create []
+  # Register hook to clear scrollback when conversation is cleared
+  (hooks/add :conversation-clear
+    (fn [] (reset-state)))
+  
   @{:name :chat
     :state @{}
     :rect nil
