@@ -1,5 +1,6 @@
 (import core/tools :as tools)
 (import core/buffers :as buffers)
+(import core/truncate :as trunc)
 
 # ── Image detection by magic bytes ─────────────────────────────
 
@@ -63,8 +64,29 @@
               :media_type media-type
               :data b64}})
 
+(defn- read-text-file-with-truncation
+  "Read a text file with truncation to prevent overwhelming the LLM."
+  [path]
+  (def content (slurp path))
+  (def trunc-result (trunc/truncate-head content))
+  
+  (if (trunc-result :truncated)
+    (do
+      # Save a reference to the original file since it already exists
+      (def notice (string/format "\n\n[File truncated: showing first %d lines of %d (%s of %s). Full file: %s]"
+                                (trunc-result :output-lines)
+                                (trunc-result :total-lines)
+                                (trunc/format-size (trunc-result :output-bytes))
+                                (trunc/format-size (trunc-result :total-bytes))
+                                path))
+      (string (trunc-result :content) notice))
+    content))
+
 (tools/register "read_file"
-  {:description "Read the contents of a file at the given relative path. Use this when you need to see what's inside a file. Do not use this with directory names."
+  {:description (string/format ```Read the contents of a file at the given relative path. Use this when you need to see what's inside a file. Do not use this with directory names.
+Text files are truncated to first %d lines or %s (whichever is hit first) to prevent overwhelming context. If truncated, the full file path is provided.```
+                               trunc/DEFAULT_MAX_LINES 
+                               (trunc/format-size trunc/DEFAULT_MAX_BYTES))
    :schema {:type "object"
             :properties {:path {:type "string"
                                 :description "The relative path of a file to read"}}
@@ -74,6 +96,4 @@
                (def media-type (detect-image-type path))
                (if media-type
                  (read-image-as-content path media-type)
-                 (do
-                   (def buf (buffers/open path))
-                   (buffers/string-content buf))))})
+                 (read-text-file-with-truncation path)))})

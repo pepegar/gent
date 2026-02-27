@@ -17,6 +17,7 @@
 (import core/skills :as skills)
 (import core/widget :as widget)
 (import tui)
+(import tui/markdown :as md)
 (import core/profile :as profile)
 
 (var- stream-span-id nil)
@@ -334,13 +335,19 @@
       (when (>= col width)
         (flush-row))
       (def byte (get text ci))
-      (def char-len
-        (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
-      (def cend (min (+ ci char-len) (length text)))
-      (def ch (string/slice text ci cend))
-      (array/push current-row @{:text ch :style style})
-      (++ col)
-      (set ci cend)))
+      # Handle newlines explicitly - they should force a row break
+      (if (= byte (chr "\n"))
+        (do
+          (flush-row)
+          (++ ci))
+        (do
+          (def char-len
+            (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+          (def cend (min (+ ci char-len) (length text)))
+          (def ch (string/slice text ci cend))
+          (array/push current-row @{:text ch :style style})
+          (++ col)
+          (set ci cend)))))
 
   (if (line :spans)
     (each span (line :spans)
@@ -380,12 +387,18 @@
   [line width]
   (length (line-to-visual-rows-cached line width)))
 
+(defn- effective-width
+  "Return the content width for a scrollback line.
+   Lines with a :row-style get a gutter column, so their content is 1 char narrower."
+  [line width]
+  (if (line :row-style) (- width 1) width))
+
 (defn- total-visual-rows
   "Count total visual rows across all scrollback lines at given width."
   [width]
   (var total 0)
   (each line scrollback
-    (set total (+ total (count-visual-rows line width))))
+    (set total (+ total (count-visual-rows line (effective-width line width)))))
   total)
 
 # ── Output helpers (scrollback-based) ─────────────────────────
@@ -472,30 +485,21 @@
   (put (last scrollback) :row-style :user-row-bg))
 
 (defn output-agent [lines]
-  "Add agent response to scrollback with word-wrapping."
-  (when (> (length scrollback) 0) (push-line ""))  # Single blank line
-  (def w (widget/get-widget :chat))
-  (def max-width
-    (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 10))
-      72))
-  (def parts (string/split "\n" lines))
+  "Add agent response to scrollback with markdown styling."
+  (when (> (length scrollback) 0) (push-line ""))
   (var first true)
-  (each line parts
-    (if (= "" line)
-      (do (push-line "")
-          (put (last scrollback) :row-style :agent-row-bg))
-      (do
-        (def wrapped (word-wrap line max-width))
-        (each wl wrapped
+  (def parser
+    (md/create-chat-markdown-parser
+      (fn [spans]
+        (def prefixed
           (if first
-            (do
-              (push-raw-line
-                @[@{:text "   gent: " :style (colors :agent-label)}
-                  @{:text wl :style (tui/style)}])
-              (set first false))
-            (push-line (string "         " wl)))
-          (put (last scrollback) :row-style :agent-row-bg)))))
+            (do (set first false)
+                (array/concat @[@{:text "   gent: " :style (colors :agent-label)}] spans))
+            (array/concat @[@{:text "         " :style (tui/style)}] spans)))
+        (push-raw-line prefixed)
+        (put (last scrollback) :row-style :agent-row-bg))))
+  ((parser :feed) lines)
+  ((parser :finish))
   (push-line ""))
 
 (defn output-tool [name &opt detail]
@@ -626,29 +630,58 @@
 # ── Human-readable tool-result renderers ─────────────────────
 
 (defn output-bash-result [text]
-  "Parse bash result (exit code: N\\nstdout:\\n...\\nstderr:\\n...) and render structured output."
+  "Parse bash result and render structured output.
+   Handles both structured format (exit code: N\\nstdout:\\n...\\nstderr:\\n...)
+   and raw format (plain output, optionally ending with 'Command exited with code N')."
   (def lines (string/split "\n" text))
   (var exit-code 0)
   (var section nil)
   (def stdout-lines @[])
   (def stderr-lines @[])
+  (def raw-lines @[])
+  (var has-structured-format false)
 
   (each line lines
     (cond
       (string/has-prefix? "exit code: " line)
-      (set exit-code (or (scan-number (string/slice line 11)) 0))
+      (do (set exit-code (or (scan-number (string/slice line 11)) 0))
+          (set has-structured-format true))
 
-      (= "stdout:" line) (set section :stdout)
-      (= "stderr:" line) (set section :stderr)
+      (= "stdout:" line) (do (set section :stdout) (set has-structured-format true))
+      (= "stderr:" line) (do (set section :stderr) (set has-structured-format true))
 
       (= section :stdout) (array/push stdout-lines line)
-      (= section :stderr) (array/push stderr-lines line)))
+      (= section :stderr) (array/push stderr-lines line)
 
-  # Trim trailing empty lines
-  (while (and (> (length stdout-lines) 0) (= "" (last stdout-lines)))
-    (array/pop stdout-lines))
-  (while (and (> (length stderr-lines) 0) (= "" (last stderr-lines)))
-    (array/pop stderr-lines))
+      # Raw format: collect all lines
+      (array/push raw-lines line)))
+
+  # Detect exit code from raw format (e.g. "Command exited with code 1")
+  (when (and (not has-structured-format) (> (length raw-lines) 0))
+    (def last-line (last raw-lines))
+    (when (string/has-prefix? "\nCommand exited with code " (string "\n" last-line))
+      (def code-str (string/slice last-line (length "Command exited with code ")))
+      (set exit-code (or (scan-number code-str) 0))
+      (array/pop raw-lines)
+      # Also remove the preceding empty line if present
+      (when (and (> (length raw-lines) 0) (= "" (last raw-lines)))
+        (array/pop raw-lines))))
+
+  # Choose which lines to display
+  (def all-lines
+    (if has-structured-format
+      (do
+        # Trim trailing empty lines from structured format
+        (while (and (> (length stdout-lines) 0) (= "" (last stdout-lines)))
+          (array/pop stdout-lines))
+        (while (and (> (length stderr-lines) 0) (= "" (last stderr-lines)))
+          (array/pop stderr-lines))
+        (array/concat @[] stdout-lines stderr-lines))
+      (do
+        # Trim trailing empty lines from raw format
+        (while (and (> (length raw-lines) 0) (= "" (last raw-lines)))
+          (array/pop raw-lines))
+        raw-lines)))
 
   (def success (= 0 exit-code))
   (def row-bg (if success :tool-success-bg :tool-error-bg))
@@ -659,8 +692,7 @@
       @[@{:text (string "         ✗ exit " exit-code) :style (colors :bash-exit-fail)}])
     (put (last scrollback) :row-style row-bg))
 
-  # Show stdout (combine with stderr if both present)
-  (def all-lines (array/concat @[] stdout-lines stderr-lines))
+  # Show output lines
   (def total (length all-lines))
   (def show-n (min total tool-result-max-lines))
   (for i 0 show-n
@@ -738,66 +770,43 @@
 
 # ── Streaming output ──────────────────────────────────────────
 
-(var- stream-state @{:active false :line-buf @"" :first true})
+(var- stream-state @{:active false :line-buf @"" :first true :parser nil})
 
 (defn- stream-start-output []
-  (when (> (length scrollback) 0) (push-line ""))  # Single blank line
+  (when (> (length scrollback) 0) (push-line ""))
   (put stream-state :active true)
   (put stream-state :first true)
-  (buffer/clear (stream-state :line-buf)))
+  (buffer/clear (stream-state :line-buf))
+  (def parser
+    (md/create-chat-markdown-parser
+      (fn [spans]
+        (def prefixed
+          (if (stream-state :first)
+            (do (put stream-state :first false)
+                (array/concat @[@{:text "   gent: " :style (colors :agent-label)}] spans))
+            (array/concat @[@{:text "         " :style (tui/style)}] spans)))
+        (push-raw-line prefixed)
+        (put (last scrollback) :row-style :agent-row-bg))))
+  (put stream-state :parser parser))
 
 (defn- stream-delta [text]
+  (def parser (stream-state :parser))
+  ((parser :feed) text)
   (def buf (stream-state :line-buf))
-  (def w (widget/get-widget :chat))
-  (def max-width
-    (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 10))
-      72))
   (each byte text
     (if (= byte (chr "\n"))
-      (do
-        (def line (string buf))
-        (buffer/clear buf)
-        (if (= "" line)
-          (do (push-line "")
-              (put (last scrollback) :row-style :agent-row-bg))
-          (do
-            (def wrapped (word-wrap line max-width))
-            (each wl wrapped
-              (if (stream-state :first)
-                (do
-                  (push-raw-line
-                    @[@{:text "   gent: " :style (colors :agent-label)}
-                      @{:text wl :style (tui/style)}])
-                  (put stream-state :first false))
-                (push-line (string "         " wl)))
-              (put (last scrollback) :row-style :agent-row-bg)))))
+      (buffer/clear buf)
       (buffer/push buf byte)))
   (widget/mark-dirty :chat))
 
 (defn- stream-end-output []
-  (def buf (stream-state :line-buf))
-  (def w (widget/get-widget :chat))
-  (def max-width
-    (if (and w (w :rect))
-      (max 20 (- ((w :rect) :width) 10))
-      72))
-  (when (> (length buf) 0)
-    (def line (string buf))
-    (def wrapped (word-wrap line max-width))
-    (each wl wrapped
-      (if (stream-state :first)
-        (do
-          (push-raw-line
-            @[@{:text "   gent: " :style (colors :agent-label)}
-              @{:text wl :style (tui/style)}])
-          (put stream-state :first false))
-        (push-line (string "         " wl)))
-      (put (last scrollback) :row-style :agent-row-bg)))
+  (def parser (stream-state :parser))
+  (when parser ((parser :finish)))
   (def had-content (not (stream-state :first)))
-  (buffer/clear buf)
+  (buffer/clear (stream-state :line-buf))
   (put stream-state :active false)
   (put stream-state :first true)
+  (put stream-state :parser nil)
   (when had-content (push-line "")))
 
 # ── Spinner ────────────────────────────────────────────────────
@@ -1279,6 +1288,14 @@
         (def [event-type event-data] poll-result)
         (cond
           (= event-type :done) (finish-current-async-tool event-data)
+          (= event-type :partial)
+          (do
+            # Update spinner with partial output preview
+            (def idx (tool-exec :current-idx))
+            (def tc (get (tool-exec :tool-calls) idx))
+            (def preview (string/slice event-data 0 (min 50 (length event-data))))
+            (def truncated (if (> (length event-data) 50) "…" ""))
+            (spinner-start (string "running " (tc :name) ": " preview truncated)))
           (= event-type :error)
           (do
             (def idx (tool-exec :current-idx))
@@ -1318,7 +1335,8 @@
   # Phase 1: Skip scroll-offset visual rows from the bottom
   (while (and (>= line-idx 0) (> skip-rows 0))
     (def line (get scrollback line-idx))
-    (def rows (line-to-visual-rows-cached line width))
+    (def eff-w (effective-width line width))
+    (def rows (line-to-visual-rows-cached line eff-w))
     (def n-rows (length rows))
     (if (<= n-rows skip-rows)
       (do (set skip-rows (- skip-rows n-rows))
@@ -1337,7 +1355,8 @@
   # Phase 2: Collect visual rows for the viewport
   (while (and (>= line-idx 0) (< (length visual-rows) render-height))
     (def line (get scrollback line-idx))
-    (def rows (line-to-visual-rows-cached line width))
+    (def eff-w (effective-width line width))
+    (def rows (line-to-visual-rows-cached line eff-w))
     (def rs (line :row-style))
     (var ri (- (length rows) 1))
     (while (and (>= ri 0) (< (length visual-rows) render-height))
@@ -1356,7 +1375,9 @@
   (for i 0 visible-count
     (def [row rs] (get ordered i))
     (def y (+ (rect :y) y-offset i))
-    (var col (rect :x))
+    # Content starts 1 column right of the gutter for styled rows
+    (def content-x (if rs (+ (rect :x) 1) (rect :x)))
+    (var col content-x)
     (each cell row
       (when (>= col (+ (rect :x) width)) (break))
       (tui/buffer-set-char buf col y (cell :text) (cell :style))

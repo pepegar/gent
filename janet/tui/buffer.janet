@@ -81,18 +81,22 @@
   (def len (length text))
   (while (< i len)
     (def byte (get text i))
-    # Determine UTF-8 character length from lead byte
-    (def char-len
-      (cond
-        (< byte 0x80) 1
-        (< byte 0xE0) 2
-        (< byte 0xF0) 3
-        4))
-    (def end (min (+ i char-len) len))
-    (def ch (string/slice text i end))
-    (buffer-set-char buf col y ch st)
-    (++ col)
-    (set i end)))
+    # Skip newlines and other control characters - they shouldn't be rendered
+    (if (or (= byte 10) (= byte 13) (< byte 32))
+      (++ i)
+      (do
+        # Determine UTF-8 character length from lead byte
+        (def char-len
+          (cond
+            (< byte 0x80) 1
+            (< byte 0xE0) 2
+            (< byte 0xF0) 3
+            4))
+        (def end (min (+ i char-len) len))
+        (def ch (string/slice text i end))
+        (buffer-set-char buf col y ch st)
+        (++ col)
+        (set i end)))))
 
 (defn buffer-set-style
   "Apply a style to all cells within a rect (merged on top of existing)."
