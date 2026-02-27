@@ -99,46 +99,49 @@
   "Convert markdown text to a sequence of styled lines"
   (def lines @[])
   (def raw-lines (string/split "\n" md-text))
+  (var in-code-block false)
 
   (each raw-line raw-lines
     (def trimmed (string/trim raw-line))
 
-    (cond
-      # Empty line
-      (= trimmed "")
-      (array/push lines (line (span "" style-default)))
+    (if (string/has-prefix? "```" trimmed)
+      (do
+        (set in-code-block (not in-code-block))
+        (array/push lines (line (span raw-line (styles :code-block)))))
+      (if in-code-block
+        (array/push lines (line (span raw-line (styles :code-block))))
+        (cond
+          # Empty line
+          (= trimmed "")
+          (array/push lines (line (span "" style-default)))
 
-      # Header (starts with #)
-      (string/has-prefix? "#" trimmed)
-      (let [space-pos (string/find " " trimmed)
-            level (if space-pos space-pos (length trimmed))
-            level (min 6 level)
-            text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
-            header-style (get styles (keyword "h" (string level)))]
-        (array/push lines (line ;(parse-inline-spans text header-style))))
+          # Header (starts with #)
+          (string/has-prefix? "#" trimmed)
+          (let [space-pos (string/find " " trimmed)
+                level (if space-pos space-pos (length trimmed))
+                level (min 6 level)
+                text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
+                header-style (get styles (keyword "h" (string level)))]
+            (array/push lines (line ;(parse-inline-spans text header-style))))
 
-      # Unordered list item (starts with -, *, +)
-      (or (string/has-prefix? "- " trimmed)
-          (string/has-prefix? "* " trimmed)
-          (string/has-prefix? "+ " trimmed))
-      (let [text (string/slice trimmed 2)]
-        (array/push lines (line (span "• " (styles :list-marker))
-                                ;(parse-inline-spans text style-default))))
+          # Unordered list item (starts with -, *, +)
+          (or (string/has-prefix? "- " trimmed)
+              (string/has-prefix? "* " trimmed)
+              (string/has-prefix? "+ " trimmed))
+          (let [text (string/slice trimmed 2)]
+            (array/push lines (line (span "• " (styles :list-marker))
+                                    ;(parse-inline-spans text style-default))))
 
-      # Numbered list item
-      (numbered-list-text trimmed)
-      (let [text (numbered-list-text trimmed)
-            dot-pos (string/find ". " trimmed)
-            marker (string (string/slice trimmed 0 dot-pos) ". ")]
-        (array/push lines (line (span marker (styles :list-marker))
-                                ;(parse-inline-spans text style-default))))
+          # Numbered list item
+          (numbered-list-text trimmed)
+          (let [text (numbered-list-text trimmed)
+                dot-pos (string/find ". " trimmed)
+                marker (string (string/slice trimmed 0 dot-pos) ". ")]
+            (array/push lines (line (span marker (styles :list-marker))
+                                    ;(parse-inline-spans text style-default))))
 
-      # Code block (starts with ```)
-      (string/has-prefix? "```" trimmed)
-      (array/push lines (line (span raw-line (styles :code-block))))
-
-      # Regular text — apply inline formatting
-      (array/push lines (line ;(parse-inline-spans raw-line style-default)))))
+          # Regular text — apply inline formatting
+          (array/push lines (line ;(parse-inline-spans raw-line style-default)))))))
 
   lines)
 
@@ -216,9 +219,21 @@
 
 (defn create-chat-markdown-parser [output-callback]
   "Create a streaming markdown parser for chat integration.
-   Processes complete lines and calls output-callback with span arrays."
+   Processes complete lines and calls output-callback with span arrays.
+   Tracks fenced code block state so inline formatting is suppressed inside."
 
   (def buffer @"")
+  (var in-code-block false)
+
+  (def parse-line (fn [line-text]
+                    (def trimmed (string/trim line-text))
+                    (if (string/has-prefix? "```" trimmed)
+                      (do
+                        (set in-code-block (not in-code-block))
+                        @[(span line-text (styles :code-block))])
+                      (if in-code-block
+                        @[(span line-text (styles :code-block))]
+                        (parse-line-spans line-text)))))
 
   (def feed-fn (fn [text]
                  (buffer/push buffer text)
@@ -230,7 +245,7 @@
 
                  (while pos
                    (def line-text (string/slice buf-str start pos))
-                   (output-callback (parse-line-spans line-text))
+                   (output-callback (parse-line line-text))
                    (set start (+ pos 1))
                    (set pos (string/find "\n" buf-str start)))
 
@@ -243,7 +258,7 @@
   (def finish-fn (fn []
                    (def buf-str (string buffer))
                    (when (> (length buf-str) 0)
-                     (output-callback (parse-line-spans buf-str)))
+                     (output-callback (parse-line buf-str)))
                    (buffer/clear buffer)))
 
   @{:feed feed-fn :finish finish-fn})

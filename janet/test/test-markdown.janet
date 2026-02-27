@@ -167,6 +167,26 @@
   (t/assert= "1. " ((get first-spans 0) :text))
   (t/assert= "First" ((get first-spans 1) :text)))
 
+(defn test-code-block-preserves-asterisks []
+  (def sample "```janet\n(def idx (+ (* row w) col))\n```")
+  (def lines (md/markdown->lines sample))
+  (t/assert= 3 (length lines))
+  (def code-line (get lines 1))
+  (def spans (code-line :spans))
+  (t/assert= 1 (length spans))
+  (t/assert= "(def idx (+ (* row w) col))" ((get spans 0) :text)))
+
+(defn test-streaming-code-block-preserves-asterisks []
+  (def output @[])
+  (def parser (md/create-chat-markdown-parser
+                (fn [spans] (array/push output spans))))
+  ((parser :feed) "```janet\n(def idx (+ (* row w) col))\n```\n")
+  ((parser :finish))
+  (t/assert= 3 (length output))
+  (def code-spans (get output 1))
+  (t/assert= 1 (length code-spans))
+  (t/assert= "(def idx (+ (* row w) col))" ((get code-spans 0) :text)))
+
 # Run tests
 (t/test "basic parsing" test-basic-parsing)
 (t/test "list items" test-list-items)
@@ -182,3 +202,5 @@
 (t/test "inline in header" test-inline-in-header)
 (t/test "streaming inline bold" test-streaming-inline-bold)
 (t/test "streaming numbered list" test-streaming-numbered-list)
+(t/test "code block preserves asterisks" test-code-block-preserves-asterisks)
+(t/test "streaming code block preserves asterisks" test-streaming-code-block-preserves-asterisks)

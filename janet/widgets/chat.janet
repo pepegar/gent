@@ -1476,11 +1476,11 @@
         (do
           (def label-style (colors :agent-label))
           (def text-style (tui/style))
-          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y "  gent: " label-style)
-          (tui/buffer-set-string buf (+ (rect :x) 9) partial-y partial-text text-style))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y "   gent: " label-style)
+          (tui/buffer-set-string buf (+ (rect :x) 10) partial-y partial-text text-style))
         (do
           (def style (tui/style))
-          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "        " partial-text) style)))))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "         " partial-text) style)))))
 
   # Render spinner (3-row gentleman) at bottom when active and scrolled to bottom
   (when (and (spinner-active?) (= scroll-offset 0))
@@ -1571,8 +1571,7 @@
                (do
                  # Only toggle when idle to prevent rendering artifacts
                  (when (= mode :idle)
-                   (def visible (toggle-thinking-visibility))
-                   (output-info (string "Thinking blocks: " (if visible "visible" "hidden")))))))
+                   (toggle-thinking-visibility)))))
 
     :update (fn [self] (tick))
 
