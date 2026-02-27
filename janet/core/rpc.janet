@@ -24,7 +24,7 @@
   (try
     (set parsed (json/decode json-string))
     ([err]
-      (break @{:error @{:code parse-error :message "Parse error"}})))
+     (break @{:error @{:code parse-error :message "Parse error"}})))
   (when (nil? parsed)
     (break @{:error @{:code parse-error :message "Parse error"}}))
   (when (not (or (table? parsed) (struct? parsed)))
@@ -56,7 +56,7 @@
   (try
     (set parsed (json/decode json-string))
     ([err]
-      (break @[@{:error @{:code parse-error :message "Parse error"}}])))
+     (break @[@{:error @{:code parse-error :message "Parse error"}}])))
   (when (nil? parsed)
     (break @[@{:error @{:code parse-error :message "Parse error"}}]))
   (when (not (or (array? parsed) (tuple? parsed)))

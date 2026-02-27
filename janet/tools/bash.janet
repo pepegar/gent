@@ -118,9 +118,9 @@ Output is truncated to last %d lines or %s (whichever is hit first). If truncate
                (try
                  (set proc (os/spawn ["bash" "-c" wrapper] :p {:in devnull}))
                  ([err]
-                   (when devnull (:close devnull))
-                   (cleanup-temp paths)
-                   (break (string "Error: failed to start process: " err))))
+                  (when devnull (:close devnull))
+                  (cleanup-temp paths)
+                  (break (string "Error: failed to start process: " err))))
 
                # Return async tool handle — polled by the agent loop every ~16ms
                (tools/async-tool

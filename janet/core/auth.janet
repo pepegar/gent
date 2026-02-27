@@ -108,8 +108,8 @@
         # json/decode uses keyword keys, but auth code expects string keys
         (stringify-keys tbl))
       ([err]
-        (eprintf "Warning: failed to read auth.json: %s" (string err))
-        @{}))
+       (eprintf "Warning: failed to read auth.json: %s" (string err))
+       @{}))
     @{}))
 
 (defn- write-auth-file [data]
@@ -123,10 +123,10 @@
         # Rename for atomicity
         (os/rename tmp-path auth-path))
       ([err]
-        (eprintf "Warning: failed to write auth.json: %s" (string err))
+       (eprintf "Warning: failed to write auth.json: %s" (string err))
         # Clean up temp file if rename failed
-        (when (os/stat tmp-path)
-          (os/rm tmp-path))))))
+       (when (os/stat tmp-path)
+         (os/rm tmp-path))))))
 
 # ── Config value resolution ───────────────────────────────────────────
 # Similar to pi-mono's resolve-config-value:
@@ -257,8 +257,8 @@
                   (set-credential provider new-cred)
                   (break ((oauth-provider :get-api-key) new-cred))))
               ([err]
-                (eprintf "Warning: OAuth token refresh failed for %s: %s" provider (string err))
-                nil))
+               (eprintf "Warning: OAuth token refresh failed for %s: %s" provider (string err))
+               nil))
             # Token still valid
             (break ((oauth-provider :get-api-key) cred)))))))
 
@@ -326,7 +326,7 @@
   # SHA-256 hash of verifier, base64url-encoded as challenge
   (def challenge-result
     (process/exec "sh" ["-c"
-      (string "printf '%s' '" verifier "' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=\\n'")]))
+                        (string "printf '%s' '" verifier "' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=\\n'")]))
   (when (not= 0 (challenge-result :status))
     (error "Failed to generate PKCE challenge"))
   (def challenge (string/trim (challenge-result :stdout)))
@@ -425,9 +425,9 @@
     (error "No refresh token available"))
 
   (def body (json/encode
-    @{"grant_type" "refresh_token"
-      "client_id" anthropic-client-id
-      "refresh_token" refresh-token}))
+             @{"grant_type" "refresh_token"
+               "client_id" anthropic-client-id
+               "refresh_token" refresh-token}))
 
   (def response
     (http/request "POST" anthropic-token-url

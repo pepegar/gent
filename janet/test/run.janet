@@ -73,8 +73,8 @@
       (+= total-tests (t/tests))
       (+= total-fail (t/fail)))
     ([err]
-      (eprintf "ERROR loading %s: %s" mod (string err))
-      (++ total-error))))
+     (eprintf "ERROR loading %s: %s" mod (string err))
+     (++ total-error))))
 
 (print)
 (printf "═══ Results: %d tests, %d failed, %d errors ═══"

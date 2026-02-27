@@ -390,9 +390,9 @@
     (try
       (http/stream "POST" (config :url) headers body (fn [line] ((parser :feed) line)))
       ([err]
-        (when-let [cb (get callbacks :on-error)]
-          (cb (string err)))
-        nil)))
+       (when-let [cb (get callbacks :on-error)]
+         (cb (string err)))
+       nil)))
 
   (def response ((parser :finish)))
 

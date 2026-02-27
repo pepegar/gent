@@ -259,8 +259,8 @@
           (string/format "%q" result)))
       (chat/output-eval code result-str))
     ([err]
-      (chat/output-eval code nil)
-      (chat/output-error (string err))))
+     (chat/output-eval code nil)
+     (chat/output-error (string err))))
   (widget/mark-dirty :separator)
   (widget/mark-dirty :editor))
 
@@ -297,10 +297,10 @@
   (term/write "\x1b[?25h")    # show cursor
   (term/write "\x1b[>1u")     # enable Kitty keyboard protocol (disambiguate Shift+Enter etc.)
   (defer (do
-    (term/write "\x1b[<u")      # pop Kitty keyboard enhancement flags
-    (term/write "\x1b[?25h")
-    (term/write "\x1b[?1049l")  # leave alternate screen buffer
-    (term/disable-raw-mode))
+          (term/write "\x1b[<u")      # pop Kitty keyboard enhancement flags
+          (term/write "\x1b[?25h")
+          (term/write "\x1b[?1049l")  # leave alternate screen buffer
+          (term/disable-raw-mode))
 
     # Initialize ui layout (for backward compat — editor uses it)
     (ui/refresh-layout)
@@ -367,211 +367,211 @@
       # 1. Determine poll timeout
       # Use short timeout when active or when RPC clients are connected
       # so we don't block on terminal events and starve TCP reads.
-      (def timeout
-        (cond
-          (chat/active?) 16
-          (and rpc-server (rpc-srv/has-clients? rpc-server)) 50
-          rpc-server 100
-          nil))
+                                                   (def timeout
+                                                     (cond
+                                                       (chat/active?) 16
+                                                       (and rpc-server (rpc-srv/has-clients? rpc-server)) 50
+                                                       rpc-server 100
+                                                       nil))
 
       # 2. Poll terminal event
-      (def ev (profile/with-span "event:poll" "io" (fn [] (term/read-event timeout))))
+                                                   (def ev (profile/with-span "event:poll" "io" (fn [] (term/read-event timeout))))
 
       # 3. Handle terminal event
-      (when ev
-        (def ev-type (get ev :type))
-        (cond
-          (= :resize ev-type)
-          # Resize — refresh layout, full redraw
-          (profile/with-span "event:resize" "event" (fn []
-            (refresh-and-layout)
-            (widget/mark-all-dirty)))
+                                                   (when ev
+                                                     (def ev-type (get ev :type))
+                                                     (cond
+                                                       (= :resize ev-type)
+                                                       # Resize — refresh layout, full redraw
+                                                       (profile/with-span "event:resize" "event" (fn []
+                                                                                                  (refresh-and-layout)
+                                                                                                  (widget/mark-all-dirty)))
 
-          (= :scroll ev-type)
-          # Mouse scroll → coalesce all pending scroll events into one batch
-          (do
-            (var scroll-delta (if (= :up (get ev :direction)) 1 -1))
-            (var next (term/read-event 0))
-            (while (and next (= :scroll (get next :type)))
-              (if (= :up (get next :direction)) (++ scroll-delta) (-- scroll-delta))
-              (set next (term/read-event 0)))
-            (var scroll-result nil)
-            (profile/with-span-meta "event:scroll" "event"
-              @{:coalesced (math/abs scroll-delta)}
-              (fn []
-                (when (> scroll-delta 0)
-                  (set scroll-result (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta})))
-                (when (< scroll-delta 0)
-                  (set scroll-result (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)})))))
-            (when (and scroll-result (tuple? scroll-result) (= :scroll-optimized (first scroll-result)))
-              (scroll-region-optimize (get scroll-result 1) (get scroll-result 2)))
-            # If we read a non-scroll event, handle it next iteration
-            # by pushing it back — but term has no pushback, so handle inline
-            (when next
-              (def next-type (get next :type))
-              (cond
-                (= :resize next-type)
-                (do (refresh-and-layout) (widget/mark-all-dirty))
-                # Key events → editor (capture result and handle it)
-                (= :key next-type)
-                (do
-                  (def key-result (widget/dispatch :editor next))
-                  (cond
-                    (= key-result :quit)
-                    (do (chat/cleanup) (set should-quit true) (break))
+                                                       (= :scroll ev-type)
+                                                       # Mouse scroll → coalesce all pending scroll events into one batch
+                                                       (do
+                                                         (var scroll-delta (if (= :up (get ev :direction)) 1 -1))
+                                                         (var next (term/read-event 0))
+                                                         (while (and next (= :scroll (get next :type)))
+                                                           (if (= :up (get next :direction)) (++ scroll-delta) (-- scroll-delta))
+                                                           (set next (term/read-event 0)))
+                                                         (var scroll-result nil)
+                                                         (profile/with-span-meta "event:scroll" "event"
+                                                           @{:coalesced (math/abs scroll-delta)}
+                                                           (fn []
+                                                             (when (> scroll-delta 0)
+                                                               (set scroll-result (widget/dispatch :chat {:type :scroll-line-up :lines scroll-delta})))
+                                                             (when (< scroll-delta 0)
+                                                               (set scroll-result (widget/dispatch :chat {:type :scroll-line-down :lines (math/abs scroll-delta)})))))
+                                                         (when (and scroll-result (tuple? scroll-result) (= :scroll-optimized (first scroll-result)))
+                                                           (scroll-region-optimize (get scroll-result 1) (get scroll-result 2)))
+                                                         # If we read a non-scroll event, handle it next iteration
+                                                         # by pushing it back — but term has no pushback, so handle inline
+                                                         (when next
+                                                           (def next-type (get next :type))
+                                                           (cond
+                                                             (= :resize next-type)
+                                                             (do (refresh-and-layout) (widget/mark-all-dirty))
+                                                             # Key events → editor (capture result and handle it)
+                                                             (= :key next-type)
+                                                             (do
+                                                               (def key-result (widget/dispatch :editor next))
+                                                               (cond
+                                                                 (= key-result :quit)
+                                                                 (do (chat/cleanup) (set should-quit true) (break))
 
-                    (= key-result :stop)
-                    (chat/stop)
+                                                                 (= key-result :stop)
+                                                                 (chat/stop)
 
-                    (string? key-result)
-                    (when (not= "" key-result)
-                      (def cmd-result (commands/dispatch key-result))
-                      (if (get cmd-result :handled)
-                        (if (= :quit (get cmd-result :result))
-                          (do (chat/cleanup) (set should-quit true) (break))
-                          (do
-                            (chat/output-user key-result)
-                            (def r (get cmd-result :result))
-                            (when (and r (not= "" r))
-                              (each line (string/split "\n" r)
-                                (chat/output-info line)))
-                            (widget/mark-dirty :separator)))
-                        (chat/submit key-result)))
+                                                                 (string? key-result)
+                                                                 (when (not= "" key-result)
+                                                                   (def cmd-result (commands/dispatch key-result))
+                                                                   (if (get cmd-result :handled)
+                                                                     (if (= :quit (get cmd-result :result))
+                                                                       (do (chat/cleanup) (set should-quit true) (break))
+                                                                       (do
+                                                                         (chat/output-user key-result)
+                                                                         (def r (get cmd-result :result))
+                                                                         (when (and r (not= "" r))
+                                                                           (each line (string/split "\n" r)
+                                                                             (chat/output-info line)))
+                                                                         (widget/mark-dirty :separator)))
+                                                                     (chat/submit key-result)))
 
-                    (and (tuple? key-result) (= :eval (first key-result)))
-                    (do
-                      (def code (get key-result 1))
-                      (when (and code (not= "" code))
-                        (eval-janet-inline code)))
+                                                                 (and (tuple? key-result) (= :eval (first key-result)))
+                                                                 (do
+                                                                   (def code (get key-result 1))
+                                                                   (when (and code (not= "" code))
+                                                                     (eval-janet-inline code)))
 
-                    # Scroll signals → chat widget
-                    (= key-result :scroll-up)
-                    (widget/dispatch :chat {:type :scroll-up})
+                                                                 # Scroll signals → chat widget
+                                                                 (= key-result :scroll-up)
+                                                                 (widget/dispatch :chat {:type :scroll-up})
 
-                    (= key-result :scroll-down)
-                    (widget/dispatch :chat {:type :scroll-down})
+                                                                 (= key-result :scroll-down)
+                                                                 (widget/dispatch :chat {:type :scroll-down})
 
-                    (= key-result :scroll-line-up)
-                    (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
-                      (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                        (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                 (= key-result :scroll-line-up)
+                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
+                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
 
-                    (= key-result :scroll-line-down)
-                    (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
-                      (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                        (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                 (= key-result :scroll-line-down)
+                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
+                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
 
-                    (= key-result :rerender)
-                    (force-rerender))))))
+                                                                 (= key-result :rerender)
+                                                                 (force-rerender))))))
 
-          # All other events → editor widget
-          # Batch key events for paste performance: drain all pending
-          # key events before rendering, like we do for scroll events.
-          (profile/with-span "event:key" "event" (fn []
-            (editor/batch-begin)
-            (var result (widget/dispatch :editor ev))
-            (var leftover nil)
-            (when (nil? result)
-              (var next-ev (term/read-event 0))
-              (while (and next-ev (= :key (get next-ev :type)))
-                (set result (widget/dispatch :editor next-ev))
-                (when result (break))
-                (set next-ev (term/read-event 0)))
-              (when (and next-ev (nil? result))
-                (set leftover next-ev)))
-            (editor/batch-end)
+                                                       # All other events → editor widget
+                                                       # Batch key events for paste performance: drain all pending
+                                                       # key events before rendering, like we do for scroll events.
+                                                       (profile/with-span "event:key" "event" (fn []
+                                                                                               (editor/batch-begin)
+                                                                                               (var result (widget/dispatch :editor ev))
+                                                                                               (var leftover nil)
+                                                                                               (when (nil? result)
+                                                                                                 (var next-ev (term/read-event 0))
+                                                                                                 (while (and next-ev (= :key (get next-ev :type)))
+                                                                                                   (set result (widget/dispatch :editor next-ev))
+                                                                                                   (when result (break))
+                                                                                                   (set next-ev (term/read-event 0)))
+                                                                                                 (when (and next-ev (nil? result))
+                                                                                                   (set leftover next-ev)))
+                                                                                               (editor/batch-end)
 
-            # Handle any leftover non-key event from the drain
-            (when leftover
-              (def lt (get leftover :type))
-              (cond
-                (= :resize lt)
-                (do (refresh-and-layout) (widget/mark-all-dirty))
-                (= :scroll lt)
-                (do
-                  (def dir (get leftover :direction))
-                  (widget/dispatch :chat
-                    {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
+                                                         # Handle any leftover non-key event from the drain
+                                                                                               (when leftover
+                                                                                                 (def lt (get leftover :type))
+                                                                                                 (cond
+                                                                                                   (= :resize lt)
+                                                                                                   (do (refresh-and-layout) (widget/mark-all-dirty))
+                                                                                                   (= :scroll lt)
+                                                                                                   (do
+                                                                                                     (def dir (get leftover :direction))
+                                                                                                     (widget/dispatch :chat
+                                                                                                       {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
 
-            (cond
-              (= result :quit)
-              (do (chat/cleanup) (set should-quit true) (break))
+                                                                                               (cond
+                                                                                                 (= result :quit)
+                                                                                                 (do (chat/cleanup) (set should-quit true) (break))
 
-              (= result :stop)
-              (chat/stop)
+                                                                                                 (= result :stop)
+                                                                                                 (chat/stop)
 
-              (string? result)
-              (when (not= "" result)
-                (def cmd-result (commands/dispatch result))
-                (if (get cmd-result :handled)
-                  (if (= :quit (get cmd-result :result))
-                    (do (chat/cleanup) (set should-quit true) (break))
-                    (do
-                      (chat/output-user result)
-                      (def r (get cmd-result :result))
-                      (when (and r (not= "" r))
-                        (each line (string/split "\n" r)
-                          (chat/output-info line)))
-                      (widget/mark-dirty :separator)))
-                  (chat/submit result)))
+                                                                                                 (string? result)
+                                                                                                 (when (not= "" result)
+                                                                                                   (def cmd-result (commands/dispatch result))
+                                                                                                   (if (get cmd-result :handled)
+                                                                                                     (if (= :quit (get cmd-result :result))
+                                                                                                       (do (chat/cleanup) (set should-quit true) (break))
+                                                                                                       (do
+                                                                                                         (chat/output-user result)
+                                                                                                         (def r (get cmd-result :result))
+                                                                                                         (when (and r (not= "" r))
+                                                                                                           (each line (string/split "\n" r)
+                                                                                                             (chat/output-info line)))
+                                                                                                         (widget/mark-dirty :separator)))
+                                                                                                     (chat/submit result)))
 
-              (and (tuple? result) (= :eval (first result)))
-              (do
-                (def code (get result 1))
-                (when (and code (not= "" code))
-                  (eval-janet-inline code)))
+                                                                                                 (and (tuple? result) (= :eval (first result)))
+                                                                                                 (do
+                                                                                                   (def code (get result 1))
+                                                                                                   (when (and code (not= "" code))
+                                                                                                     (eval-janet-inline code)))
 
-              # Scroll signals → chat widget
-              (= result :scroll-up)
-              (widget/dispatch :chat {:type :scroll-up})
+                                                                                                 # Scroll signals → chat widget
+                                                                                                 (= result :scroll-up)
+                                                                                                 (widget/dispatch :chat {:type :scroll-up})
 
-              (= result :scroll-down)
-              (widget/dispatch :chat {:type :scroll-down})
+                                                                                                 (= result :scroll-down)
+                                                                                                 (widget/dispatch :chat {:type :scroll-down})
 
-              (= result :scroll-line-up)
-              (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
-                (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                  (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                                                 (= result :scroll-line-up)
+                                                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
+                                                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
 
-              (= result :scroll-line-down)
-              (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
-                (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                  (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                                                 (= result :scroll-line-down)
+                                                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
+                                                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
 
-              (= result :toggle-thinking)
-              (widget/dispatch :chat {:type :toggle-thinking})
+                                                                                                 (= result :toggle-thinking)
+                                                                                                 (widget/dispatch :chat {:type :toggle-thinking})
 
-              (= result :rerender)
-              (force-rerender))))))
+                                                                                                 (= result :rerender)
+                                                                                                 (force-rerender))))))
 
       # 4. Poll RPC server (accept connections, process requests)
-      (when rpc-server
-        (rpc-srv/poll-and-dispatch rpc-server)
-        (rpc-srv/check-mode-change rpc-server)
-        (rpc-srv/flush rpc-server)
-        (when (rpc-srv/shutdown-requested? rpc-server)
-          (chat/cleanup)
-          (set should-quit true)
-          (break)))
+                                                   (when rpc-server
+                                                     (rpc-srv/poll-and-dispatch rpc-server)
+                                                     (rpc-srv/check-mode-change rpc-server)
+                                                     (rpc-srv/flush rpc-server)
+                                                     (when (rpc-srv/shutdown-requested? rpc-server)
+                                                       (chat/cleanup)
+                                                       (set should-quit true)
+                                                       (break)))
 
       # 5. Update all widgets (chat drains stream, polls tools)
-      (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
+                                                   (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
 
       # 6. Tick widget timers
-      (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
+                                                   (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
 
       # 7. Re-layout if editor height changed
-      (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
-        (refresh-and-layout)
-        (widget/mark-all-dirty))
+                                                   (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
+                                                     (refresh-and-layout)
+                                                     (widget/mark-all-dirty))
 
       # 8. Render frame (diff-based)
-      (profile/with-span "render:frame" "render" (fn [] (render-frame)))
+                                                   (profile/with-span "render:frame" "render" (fn [] (render-frame))))))
 
-      )))
+      
 
     # Cleanup RPC server if started
     (when rpc-server
-      (rpc-srv/stop rpc-server))
+      (rpc-srv/stop rpc-server))))
 
-    ))  # close defer, defn
+      # close defer, defn

@@ -75,7 +75,7 @@
                     (auth/set-credential provider-id credentials)
                     (chat/output-info (string "✓ Logged in to " (provider :name))))
                   ([err]
-                    (chat/output-error (string "Login failed: " (string err)))))))})
+                   (chat/output-error (string "Login failed: " (string err)))))))})
 
          (string "Opening browser for " (provider :name) " login...\n"
                  "\n"
@@ -84,7 +84,7 @@
                  "After authorizing, paste the code below and press Enter.\n"
                  "(Press Escape to cancel)"))
        ([err]
-         (string "✗ Login setup failed: " (string err)))))})
+        (string "✗ Login setup failed: " (string err)))))})
 
 # ── /logout ────────────────────────────────────────────────────
 

@@ -8,6 +8,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    parinfer-rust = {
+      url = "github:eraserhd/parinfer-rust";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -15,6 +19,7 @@
     nixpkgs,
     flake-utils,
     rust-overlay,
+    parinfer-rust,
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       overlays = [(import rust-overlay)];
@@ -110,6 +115,9 @@
         buildInputs =
           nativeBuildInputs
           ++ buildInputs
+          ++ [
+            parinfer-rust.packages.${system}.default
+          ]
           ++ (with pkgs; [
             # Additional development tools
             janet # For running tests
@@ -122,8 +130,46 @@
           echo "Run 'cargo build' to build"
           echo "Run 'cargo build --features embedded' for standalone binary"
           echo "Run 'janet janet/test/run.janet' to test"
+          echo "Run 'parinfer-rust -m paren -l janet < file.janet' to format"
         '';
       };
+
+      checks.parinfer = let
+        parinfer = parinfer-rust.packages.${system}.default;
+        checkScript = pkgs.writeShellScript "parinfer-check.sh" ''
+          set -uo pipefail
+          failed=0
+          skipped=0
+          src="$1"
+          out="$2"
+          for f in $(find "$src/janet" -name '*.janet'); do
+            name="''${f#$src/}"
+            tmpfile=$(mktemp)
+            if ! ${parinfer}/bin/parinfer-rust --mode paren --language janet < "$f" > "$tmpfile" 2>/dev/null; then
+              echo "SKIP: $name (parinfer-rust cannot process this file)"
+              skipped=$((skipped + 1))
+              rm -f "$tmpfile"
+              continue
+            fi
+            if ! diff -u "$f" "$tmpfile" > /dev/null 2>&1; then
+              echo "FAIL: $name needs parinfer formatting"
+              diff -u "$f" "$tmpfile" || true
+              failed=1
+            fi
+            rm -f "$tmpfile"
+          done
+          if [ "$failed" = "1" ]; then
+            echo ""
+            echo "Run 'parinfer-rust -m paren -l janet < file.janet' to fix"
+            exit 1
+          fi
+          echo "All processable .janet files pass parinfer check (skipped $skipped)"
+          touch "$out"
+        '';
+      in
+        pkgs.runCommand "parinfer-check" {nativeBuildInputs = [parinfer pkgs.diffutils];} ''
+          ${checkScript} ${self} $out
+        '';
 
       # For `nix run`
       apps = {

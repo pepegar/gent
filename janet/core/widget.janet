@@ -222,7 +222,7 @@
       (try
         (cb data)
         ([err]
-          (eprintf "Pub/sub error on %s: %s" (string topic) (string err)))))))
+         (eprintf "Pub/sub error on %s: %s" (string topic) (string err)))))))
 
 (defn list-topics
   "Return all topics that have subscribers."
@@ -264,5 +264,5 @@
             (dofile path)
             (array/push loaded path))
           ([err]
-            (eprintf "Error loading widget %s: %s" path (string err)))))))
+           (eprintf "Error loading widget %s: %s" path (string err)))))))
   loaded)

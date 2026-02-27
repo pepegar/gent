@@ -55,24 +55,24 @@
     :handle (fn [self event] nil)
 
     :render (fn [self rect buf]
-      (when (or (nil? rect) (<= (rect :width) 0) (<= (rect :height) 0)) (break))
+             (when (or (nil? rect) (<= (rect :width) 0) (<= (rect :height) 0)) (break))
 
       # Draw border
-      (def blk (tui/block :title "Git" :borders :all :border-type :rounded
-                           :border-style (tui/style :fg (tui/color-indexed 240))))
-      (tui/render blk rect buf)
-      (def inner (tui/block-inner blk rect))
-      (when (> (inner :height) 0)
-        # Branch line
-        (def branch-text (string "⎇ " (if (= "" cached-branch) "..." cached-branch)))
-        (tui/buffer-set-string buf (inner :x) (inner :y) branch-text
-          (tui/style :fg :cyan :bold true))
+             (def blk (tui/block :title "Git" :borders :all :border-type :rounded
+                                  :border-style (tui/style :fg (tui/color-indexed 240))))
+             (tui/render blk rect buf)
+             (def inner (tui/block-inner blk rect))
+             (when (> (inner :height) 0)
+               # Branch line
+               (def branch-text (string "⎇ " (if (= "" cached-branch) "..." cached-branch)))
+               (tui/buffer-set-string buf (inner :x) (inner :y) branch-text
+                 (tui/style :fg :cyan :bold true))
 
-        # Dirty files
-        (for i 0 (min (length cached-dirty) (- (inner :height) 1))
-          (def file (get cached-dirty i))
-          (tui/buffer-set-string buf (inner :x) (+ (inner :y) 1 i) file
-            (tui/style :fg :yellow)))))})
+               # Dirty files
+               (for i 0 (min (length cached-dirty) (- (inner :height) 1))
+                 (def file (get cached-dirty i))
+                 (tui/buffer-set-string buf (inner :x) (+ (inner :y) 1 i) file
+                   (tui/style :fg :yellow)))))})
 
 (defn register!
   "Create and register the git status widget."

@@ -68,5 +68,5 @@
     (try
       (f effective-args)
       ([err]
-        (string "Command error: " err))))
+       (string "Command error: " err))))
   {:handled true :result (or result "")})

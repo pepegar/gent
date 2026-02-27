@@ -54,8 +54,8 @@
   (try
     (f)
     ([err]
-      (++ fail-count)
-      (eprintf "  ERROR in %s: %s" name (string err))))
+     (++ fail-count)
+     (eprintf "  ERROR in %s: %s" name (string err))))
   (if (= fail-count before-fail)
     (printf "  ✓ %s" name)
     (printf "  ✗ %s" name)))

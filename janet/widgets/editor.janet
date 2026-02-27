@@ -160,393 +160,393 @@
     :timers @[]
 
     :handle (fn [self event]
-      (when (= :resize (get event :type))
-        (break nil))
-      (when (not= :key (get event :type))
-        (break nil))
+             (when (= :resize (get event :type))
+               (break nil))
+             (when (not= :key (get event :type))
+               (break nil))
 
-      (def key (get event :key))
-      (def ctrl (get event :ctrl false))
-      (def alt (get event :alt false))
-      (def shift (get event :shift false))
+             (def key (get event :key))
+             (def ctrl (get event :ctrl false))
+             (def alt (get event :alt false))
+             (def shift (get event :shift false))
 
       # ── Dialog key interception ───────────────────────────
       # When a dialog is active, all keys go to the dialog.
-      (when (dialog/active?)
-        (cond
-          (and (= key :enter) (not alt) (not shift))
-          (do (dialog/submit) (break nil))
+             (when (dialog/active?)
+               (cond
+                 (and (= key :enter) (not alt) (not shift))
+                 (do (dialog/submit) (break nil))
 
-          (or (= key :escape) (and ctrl (= key "c")))
-          (do (dialog/dismiss) (break nil))
+                 (or (= key :escape) (and ctrl (= key "c")))
+                 (do (dialog/dismiss) (break nil))
 
-          (= (dialog/get-type) :input)
-          (do
-            (cond
-              (= key :backspace) (dialog/input-delete-back)
-              (and (= key :left) (not ctrl) (not alt)) (do (dialog/input-move-left) (widget/mark-dirty :chat))
-              (and (= key :right) (not ctrl) (not alt)) (do (dialog/input-move-right) (widget/mark-dirty :chat))
-              (and ctrl (= key "u")) (dialog/input-clear)
-              (and (string? key) (not ctrl) (not alt)) (dialog/input-insert key))
-            (break nil))
+                 (= (dialog/get-type) :input)
+                 (do
+                   (cond
+                     (= key :backspace) (dialog/input-delete-back)
+                     (and (= key :left) (not ctrl) (not alt)) (do (dialog/input-move-left) (widget/mark-dirty :chat))
+                     (and (= key :right) (not ctrl) (not alt)) (do (dialog/input-move-right) (widget/mark-dirty :chat))
+                     (and ctrl (= key "u")) (dialog/input-clear)
+                     (and (string? key) (not ctrl) (not alt)) (dialog/input-insert key))
+                   (break nil))
 
-          (or (= key :up) (and (string? key) (= key "k") (not ctrl) (not alt)))
-          (do (dialog/select-prev) (break nil))
+                 (or (= key :up) (and (string? key) (= key "k") (not ctrl) (not alt)))
+                 (do (dialog/select-prev) (break nil))
 
-          (or (= key :down) (and (string? key) (= key "j") (not ctrl) (not alt)))
-          (do (dialog/select-next) (break nil))
+                 (or (= key :down) (and (string? key) (= key "j") (not ctrl) (not alt)))
+                 (do (dialog/select-next) (break nil))
 
-          (and (string? key) (not ctrl) (not alt))
-          (do
-            (when-let [n (scan-number key)]
-              (when (and (>= n 1) (<= n 9))
-                (dialog/select-idx (- n 1))))
-            (break nil)))
-        (break nil))
+                 (and (string? key) (not ctrl) (not alt))
+                 (do
+                   (when-let [n (scan-number key)]
+                     (when (and (>= n 1) (<= n 9))
+                       (dialog/select-idx (- n 1))))
+                   (break nil)))
+               (break nil))
 
       # ── Prompt mode key interception ──────────────────────
       # When prompt mode is active, only basic editing and Enter/Escape work.
       # No completion, no eval, no external editor.
-      (when prompt-mode
-        (cond
-          # Enter: submit prompt input to callback
-          (and (= key :enter) (not alt) (not shift))
-          (do
-            (def text (ed/text editor-state))
-            (def callback (prompt-mode :callback))
-            (def saved (prompt-mode :saved-text))
-            (set prompt-mode nil)
-            (ed/set-text editor-state (or saved ""))
-            (put self :dirty true)
-            # Call the callback — it may produce chat output
-            (try (callback text) ([err] (eprintf "Prompt callback error: %s" (string err))))
-            (break nil))
+             (when prompt-mode
+               (cond
+                 # Enter: submit prompt input to callback
+                 (and (= key :enter) (not alt) (not shift))
+                 (do
+                   (def text (ed/text editor-state))
+                   (def callback (prompt-mode :callback))
+                   (def saved (prompt-mode :saved-text))
+                   (set prompt-mode nil)
+                   (ed/set-text editor-state (or saved ""))
+                   (put self :dirty true)
+                   # Call the callback — it may produce chat output
+                   (try (callback text) ([err] (eprintf "Prompt callback error: %s" (string err))))
+                   (break nil))
 
-          # Escape: cancel prompt
-          (= key :escape)
-          (do
-            (cancel-prompt)
-            (put self :dirty true)
-            (break nil))
+                 # Escape: cancel prompt
+                 (= key :escape)
+                 (do
+                   (cancel-prompt)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Ctrl-C: cancel prompt (same as Escape here)
-          (and ctrl (= key "c"))
-          (do
-            (cancel-prompt)
-            (put self :dirty true)
-            (break nil))
+                 # Ctrl-C: cancel prompt (same as Escape here)
+                 (and ctrl (= key "c"))
+                 (do
+                   (cancel-prompt)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Backspace
-          (= key :backspace)
-          (do
-            (ed/delete-back editor-state)
-            (put self :dirty true)
-            (break nil))
+                 # Backspace
+                 (= key :backspace)
+                 (do
+                   (ed/delete-back editor-state)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Left/Right movement
-          (= key :left) (do (ed/move-left editor-state) (put self :dirty true) (break nil))
-          (= key :right) (do (ed/move-right editor-state) (put self :dirty true) (break nil))
-          (= key :home) (do (ed/move-line-start editor-state) (put self :dirty true) (break nil))
-          (= key :end) (do (ed/move-line-end editor-state) (put self :dirty true) (break nil))
-          (and ctrl (= key "a")) (do (ed/move-line-start editor-state) (put self :dirty true) (break nil))
-          (and ctrl (= key "e")) (do (ed/move-line-end editor-state) (put self :dirty true) (break nil))
+                 # Left/Right movement
+                 (= key :left) (do (ed/move-left editor-state) (put self :dirty true) (break nil))
+                 (= key :right) (do (ed/move-right editor-state) (put self :dirty true) (break nil))
+                 (= key :home) (do (ed/move-line-start editor-state) (put self :dirty true) (break nil))
+                 (= key :end) (do (ed/move-line-end editor-state) (put self :dirty true) (break nil))
+                 (and ctrl (= key "a")) (do (ed/move-line-start editor-state) (put self :dirty true) (break nil))
+                 (and ctrl (= key "e")) (do (ed/move-line-end editor-state) (put self :dirty true) (break nil))
 
-          # Ctrl-U: clear input
-          (and ctrl (= key "u"))
-          (do
-            (ed/set-text editor-state "")
-            (put self :dirty true)
-            (break nil))
+                 # Ctrl-U: clear input
+                 (and ctrl (= key "u"))
+                 (do
+                   (ed/set-text editor-state "")
+                   (put self :dirty true)
+                   (break nil))
 
-          # Paste / printable char
-          (and (string? key) (not ctrl) (not alt))
-          (do
-            (ed/insert-char editor-state key)
-            (put self :dirty true)
-            (break nil))
+                 # Paste / printable char
+                 (and (string? key) (not ctrl) (not alt))
+                 (do
+                   (ed/insert-char editor-state key)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Ignore everything else in prompt mode
-          (break nil)))
+                 # Ignore everything else in prompt mode
+                 (break nil)))
 
       # ── Completion-active key interception ────────────────
-      (when (completion/active?)
-        (cond
-          # Tab: accept selected candidate
-          (= key :tab)
-          (do
-            (accept-completion self)
-            (put self :dirty true)
-            (break nil))
+             (when (completion/active?)
+               (cond
+                 # Tab: accept selected candidate
+                 (= key :tab)
+                 (do
+                   (accept-completion self)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Up: select previous
-          (and (= key :up) (not alt) (not ctrl))
-          (do
-            (completion/select-prev)
-            (put self :dirty true)
-            (break nil))
+                 # Up: select previous
+                 (and (= key :up) (not alt) (not ctrl))
+                 (do
+                   (completion/select-prev)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Down: select next
-          (and (= key :down) (not alt) (not ctrl))
-          (do
-            (completion/select-next)
-            (put self :dirty true)
-            (break nil))
+                 # Down: select next
+                 (and (= key :down) (not alt) (not ctrl))
+                 (do
+                   (completion/select-next)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Escape: dismiss popup (don't clear editor)
-          (= key :escape)
-          (do
-            (completion/dismiss)
-            (put self :dirty true)
-            (break nil))
+                 # Escape: dismiss popup (don't clear editor)
+                 (= key :escape)
+                 (do
+                   (completion/dismiss)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Enter: accept selected candidate (same as Tab)
-          (and (= key :enter) (not alt) (not shift))
-          (do
-            (accept-completion self)
-            (put self :dirty true)
-            (break nil))
+                 # Enter: accept selected candidate (same as Tab)
+                 (and (= key :enter) (not alt) (not shift))
+                 (do
+                   (accept-completion self)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Backspace: pass to editor, re-filter
-          (= key :backspace)
-          (do
-            (ed/delete-back editor-state)
-            (update-completion-filter)
-            (put self :dirty true)
-            (break nil))
+                 # Backspace: pass to editor, re-filter
+                 (= key :backspace)
+                 (do
+                   (ed/delete-back editor-state)
+                   (update-completion-filter)
+                   (put self :dirty true)
+                   (break nil))
 
-          # Printable char: pass to editor, re-filter
-          (and (string? key) (not ctrl) (not alt))
-          (do
-            (ed/insert-char editor-state key)
-            (update-completion-filter)
-            (put self :dirty true)
-            (break nil))))
+                 # Printable char: pass to editor, re-filter
+                 (and (string? key) (not ctrl) (not alt))
+                 (do
+                   (ed/insert-char editor-state key)
+                   (update-completion-filter)
+                   (put self :dirty true)
+                   (break nil))))
 
       # ── Normal key handling (completion idle or non-intercepted) ──
 
       # In batch mode, accumulate plain printable chars
-      (when (and batch-mode (string? key) (not ctrl) (not alt))
-        (buffer/push char-accum key)
-        (break nil))
+             (when (and batch-mode (string? key) (not ctrl) (not alt))
+               (buffer/push char-accum key)
+               (break nil))
 
       # Any non-printable key flushes the accumulator first
-      (flush-accum self)
+             (flush-accum self)
 
-      (cond
-        # Ctrl-C: quit
-        (and ctrl (= key "c"))
-        :quit
+             (cond
+               # Ctrl-C: quit
+               (and ctrl (= key "c"))
+               :quit
 
-        # Ctrl-D: delete forward if non-empty, quit if empty
-        (and ctrl (= key "d"))
-        (if (> (length (ed/text editor-state)) 0)
-          (do (ed/delete-forward editor-state)
-              (put self :dirty true)
-              nil)
-          :quit)
+               # Ctrl-D: delete forward if non-empty, quit if empty
+               (and ctrl (= key "d"))
+               (if (> (length (ed/text editor-state)) 0)
+                 (do (ed/delete-forward editor-state)
+                     (put self :dirty true)
+                     nil)
+                 :quit)
 
-        # Enter (no modifiers): submit
-        (and (= key :enter) (not alt) (not shift))
-        (let [text (ed/text editor-state)]
-          (ih/push text)
-          (ih/reset)
-          (ed/set-text editor-state "")
-          (put self :dirty true)
-          (if (and (> (length text) 1) (string/has-prefix? "," text))
-            [:eval (string/slice text 1)]
-            text))
+               # Enter (no modifiers): submit
+               (and (= key :enter) (not alt) (not shift))
+               (let [text (ed/text editor-state)]
+                 (ih/push text)
+                 (ih/reset)
+                 (ed/set-text editor-state "")
+                 (put self :dirty true)
+                 (if (and (> (length text) 1) (string/has-prefix? "," text))
+                   [:eval (string/slice text 1)]
+                   text))
 
-        # Alt+Enter: eval
-        (and alt (= key :enter))
-        (let [text (ed/text editor-state)]
-          (ih/push text)
-          (ih/reset)
-          (ed/set-text editor-state "")
-          (put self :dirty true)
-          [:eval text])
+               # Alt+Enter: eval
+               (and alt (= key :enter))
+               (let [text (ed/text editor-state)]
+                 (ih/push text)
+                 (ih/reset)
+                 (ed/set-text editor-state "")
+                 (put self :dirty true)
+                 [:eval text])
 
-        # Escape: clear input or stop
-        (= key :escape)
-        (cond
-          (> (length (ed/text editor-state)) 0)
-          (do (ih/reset)
-              (ed/set-text editor-state "")
-              (put self :dirty true)
-              nil)
-          :stop)
+               # Escape: clear input or stop
+               (= key :escape)
+               (cond
+                 (> (length (ed/text editor-state)) 0)
+                 (do (ih/reset)
+                     (ed/set-text editor-state "")
+                     (put self :dirty true)
+                     nil)
+                 :stop)
 
-        # Ctrl-Z: suspend (requires native)
-        (and ctrl (= key "z"))
-        (do
-          (try (term/suspend) ([_] nil))
-          # Re-enter alternate screen and restore TUI state after resume
-          (term/write "\x1b[?1049h")  # enter alternate screen buffer
-          (term/write "\x1b[2J")      # clear screen
-          (term/write "\x1b[?25h")    # show cursor
-          (term/write "\x1b[>1u")     # enable Kitty keyboard protocol
-          (put self :dirty true)
-          :rerender)
+               # Ctrl-Z: suspend (requires native)
+               (and ctrl (= key "z"))
+               (do
+                 (try (term/suspend) ([_] nil))
+                 # Re-enter alternate screen and restore TUI state after resume
+                 (term/write "\x1b[?1049h")  # enter alternate screen buffer
+                 (term/write "\x1b[2J")      # clear screen
+                 (term/write "\x1b[?25h")    # show cursor
+                 (term/write "\x1b[>1u")     # enable Kitty keyboard protocol
+                 (put self :dirty true)
+                 :rerender)
 
-        # Page up/down, arrow up/down at boundary → scroll signals
-        (= key :page-up)
-        :scroll-up
+               # Page up/down, arrow up/down at boundary → scroll signals
+               (= key :page-up)
+               :scroll-up
 
-        (= key :page-down)
-        :scroll-down
+               (= key :page-down)
+               :scroll-down
 
-        (and (= key :up) (not alt) (not ctrl))
-        (let [vis (ed/point->visual editor-state)]
-          (if (> (vis :row) 0)
-            (do (ed/move-up editor-state)
-                (put self :dirty true)
-                nil)
-            # At top row — scroll chat instead of input history
-            :scroll-line-up))
+               (and (= key :up) (not alt) (not ctrl))
+               (let [vis (ed/point->visual editor-state)]
+                 (if (> (vis :row) 0)
+                   (do (ed/move-up editor-state)
+                       (put self :dirty true)
+                       nil)
+                   # At top row — scroll chat instead of input history
+                   :scroll-line-up))
 
-        (and (= key :down) (not alt) (not ctrl))
-        (let [vis (ed/point->visual editor-state)
-              content (ed/text editor-state)
-              vlines (ed/compute-visual-lines content (editor-state :width))]
-          (if (< (vis :row) (- (length vlines) 1))
-            (do (ed/move-down editor-state)
-                (put self :dirty true)
-                nil)
-            # At bottom row — scroll chat instead of input history
-            :scroll-line-down))
+               (and (= key :down) (not alt) (not ctrl))
+               (let [vis (ed/point->visual editor-state)
+                     content (ed/text editor-state)
+                     vlines (ed/compute-visual-lines content (editor-state :width))]
+                 (if (< (vis :row) (- (length vlines) 1))
+                   (do (ed/move-down editor-state)
+                       (put self :dirty true)
+                       nil)
+                   # At bottom row — scroll chat instead of input history
+                   :scroll-line-down))
 
-        # Ctrl+Up: Previous input history
-        (and ctrl (= key :up))
-        (let [entry (ih/prev (ed/text editor-state))]
-          (if entry
-            (do (ed/set-text editor-state entry)
-                (put self :dirty true)
-                nil)
-            nil))
+               # Ctrl+Up: Previous input history
+               (and ctrl (= key :up))
+               (let [entry (ih/prev (ed/text editor-state))]
+                 (if entry
+                   (do (ed/set-text editor-state entry)
+                       (put self :dirty true)
+                       nil)
+                   nil))
 
-        # Ctrl+Down: Next input history (when browsing)
-        (and ctrl (= key :down))
-        (if (ih/browsing?)
-          (let [entry (ih/next)]
-            (if entry
-              (do (ed/set-text editor-state entry)
-                  (put self :dirty true)
-                  nil)
-              nil))
-          nil)
+               # Ctrl+Down: Next input history (when browsing)
+               (and ctrl (= key :down))
+               (if (ih/browsing?)
+                 (let [entry (ih/next)]
+                   (if entry
+                     (do (ed/set-text editor-state entry)
+                         (put self :dirty true)
+                         nil)
+                     nil))
+                 nil)
 
-        # Ctrl+G: open external editor
-        (and ctrl (= key "g"))
-        (do
-          (def result (ed/open-external editor-state))
-          (when (= (result :action) :open-external)
-            (def editor-cmd (or (os/getenv "VISUAL") (os/getenv "EDITOR") "vi"))
-            (def tmpfile (string "/tmp/.gent-edit-" (math/floor (os/clock)) ".txt"))
-            (spit tmpfile (result :text))
-            (term/write "\x1b[<u")
-            (term/write "\x1b[?1006l")
-            (term/write "\x1b[?1002l")
-            (term/write "\x1b[?25h")
-            (term/write "\x1b[?1049l")
-            (term/disable-raw-mode)
-            (try
-              (do
-                (def proc (os/spawn [editor-cmd tmpfile] :p))
-                (os/proc-wait proc))
-              ([err] (eprint "Editor failed: " err)))
-            (when (os/stat tmpfile)
-              (def new-content (string/trimr (slurp tmpfile)))
-              (ed/set-text editor-state new-content)
-              (os/rm tmpfile))
-            (term/enable-raw-mode)
-            (term/write "\x1b[?1049h")
-            (term/write "\x1b[?1002h")
-            (term/write "\x1b[?1006h")
-            (term/write "\x1b[>1u")
-            (term/write "\x1b[2J")
-            (term/write "\x1b[?25h"))
-          (put self :dirty true)
-          :rerender)
+               # Ctrl+G: open external editor
+               (and ctrl (= key "g"))
+               (do
+                 (def result (ed/open-external editor-state))
+                 (when (= (result :action) :open-external)
+                   (def editor-cmd (or (os/getenv "VISUAL") (os/getenv "EDITOR") "vi"))
+                   (def tmpfile (string "/tmp/.gent-edit-" (math/floor (os/clock)) ".txt"))
+                   (spit tmpfile (result :text))
+                   (term/write "\x1b[<u")
+                   (term/write "\x1b[?1006l")
+                   (term/write "\x1b[?1002l")
+                   (term/write "\x1b[?25h")
+                   (term/write "\x1b[?1049l")
+                   (term/disable-raw-mode)
+                   (try
+                     (do
+                       (def proc (os/spawn [editor-cmd tmpfile] :p))
+                       (os/proc-wait proc))
+                     ([err] (eprint "Editor failed: " err)))
+                   (when (os/stat tmpfile)
+                     (def new-content (string/trimr (slurp tmpfile)))
+                     (ed/set-text editor-state new-content)
+                     (os/rm tmpfile))
+                   (term/enable-raw-mode)
+                   (term/write "\x1b[?1049h")
+                   (term/write "\x1b[?1002h")
+                   (term/write "\x1b[?1006h")
+                   (term/write "\x1b[>1u")
+                   (term/write "\x1b[2J")
+                   (term/write "\x1b[?25h"))
+                 (put self :dirty true)
+                 :rerender)
 
-        # Ctrl+T: toggle thinking visibility
-        (and ctrl (= key "t"))
-        :toggle-thinking
+               # Ctrl+T: toggle thinking visibility
+               (and ctrl (= key "t"))
+               :toggle-thinking
 
-        # All other keys → editor_new, then check trigger
-        (do
-          # Reset history browsing on any text-modifying key
-          (when (and (ih/browsing?)
-                     (or (string? key)
-                         (= key :backspace)
-                         (= key :delete)
-                         (and ctrl (or (= key "k") (= key "u") (= key "w") (= key "d")
-                                       (= key "h")))
-                         (and alt (or (= key "d") (= key :backspace)))))
-            (ih/reset))
-          (ed/handle-key editor-state event)
-          (put self :dirty true)
-          # After any printable char, check for completion triggers
-          (when (and (string? key) (not ctrl) (not alt) (not (completion/active?)))
-            (try-trigger-completion))
-          nil)))
+               # All other keys → editor_new, then check trigger
+               (do
+                 # Reset history browsing on any text-modifying key
+                 (when (and (ih/browsing?)
+                            (or (string? key)
+                                (= key :backspace)
+                                (= key :delete)
+                                (and ctrl (or (= key "k") (= key "u") (= key "w") (= key "d")
+                                              (= key "h")))
+                                (and alt (or (= key "d") (= key :backspace)))))
+                   (ih/reset))
+                 (ed/handle-key editor-state event)
+                 (put self :dirty true)
+                 # After any printable char, check for completion triggers
+                 (when (and (string? key) (not ctrl) (not alt) (not (completion/active?)))
+                   (try-trigger-completion))
+                 nil)))
 
     :render (fn [self rect buf]
-      (when (nil? rect) (break))
-      (put editor-state :widget-rect rect)
+             (when (nil? rect) (break))
+             (put editor-state :widget-rect rect)
 
       # Determine prompt label based on mode
-      (def current-prompt (if prompt-mode (prompt-mode :label) prompt-text))
-      (def is-masked (and prompt-mode (prompt-mode :mask)))
+             (def current-prompt (if prompt-mode (prompt-mode :label) prompt-text))
+             (def is-masked (and prompt-mode (prompt-mode :mask)))
 
       # Resize editor to match widget rect
-      (def has-prompt (> (length current-prompt) 0))
-      (def prompt-len (if has-prompt (+ (length current-prompt) 2) 1))
-      (def edit-width (max 1 (- (rect :width) prompt-len)))
-      (ed/resize editor-state edit-width (rect :height))
+             (def has-prompt (> (length current-prompt) 0))
+             (def prompt-len (if has-prompt (+ (length current-prompt) 2) 1))
+             (def edit-width (max 1 (- (rect :width) prompt-len)))
+             (ed/resize editor-state edit-width (rect :height))
 
-      (def r (ed/render editor-state))
-      (def lines (r :lines))
-      (def vis-cursor (r :cursor))
-      (def spans (or (r :spans) @[]))
-      (set cached-cursor-row (+ (rect :y) (vis-cursor :row) 1))
-      (set cached-cursor-col (+ (rect :x) prompt-len (vis-cursor :col) 1))
-      (def prompt-style
-        (if prompt-mode
-          (tui/style :fg (tui/color-indexed 214) :bold true)
-          (tui/style :fg (tui/color-indexed 39) :bold true)))
-      (def pad (string/repeat " " prompt-len))
+             (def r (ed/render editor-state))
+             (def lines (r :lines))
+             (def vis-cursor (r :cursor))
+             (def spans (or (r :spans) @[]))
+             (set cached-cursor-row (+ (rect :y) (vis-cursor :row) 1))
+             (set cached-cursor-col (+ (rect :x) prompt-len (vis-cursor :col) 1))
+             (def prompt-style
+               (if prompt-mode
+                 (tui/style :fg (tui/color-indexed 214) :bold true)
+                 (tui/style :fg (tui/color-indexed 39) :bold true)))
+             (def pad (string/repeat " " prompt-len))
 
-      (for i 0 (rect :height)
-        (def y (+ (rect :y) i))
-        (if (= i 0)
-          (do
-            (tui/buffer-set-string buf (rect :x) y
-              (if has-prompt
-                (string " " current-prompt " ")
-                " ")
-              prompt-style)
-            (when (< i (length lines))
-              (def line-text (get lines i ""))
-              (def display-text
-                (if is-masked
-                  (string/repeat "•" (length line-text))
-                  line-text))
-              (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))
-          (do
-            (tui/buffer-set-string buf (rect :x) y pad)
-            (when (< i (length lines))
-              (def line-text (get lines i ""))
-              (def display-text
-                (if is-masked
-                  (string/repeat "•" (length line-text))
-                  line-text))
-              (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))))
+             (for i 0 (rect :height)
+               (def y (+ (rect :y) i))
+               (if (= i 0)
+                 (do
+                   (tui/buffer-set-string buf (rect :x) y
+                     (if has-prompt
+                       (string " " current-prompt " ")
+                       " ")
+                     prompt-style)
+                   (when (< i (length lines))
+                     (def line-text (get lines i ""))
+                     (def display-text
+                       (if is-masked
+                         (string/repeat "•" (length line-text))
+                         line-text))
+                     (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))
+                 (do
+                   (tui/buffer-set-string buf (rect :x) y pad)
+                   (when (< i (length lines))
+                     (def line-text (get lines i ""))
+                     (def display-text
+                       (if is-masked
+                         (string/repeat "•" (length line-text))
+                         line-text))
+                     (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))))
 
       # Apply styled spans (skip in masked mode)
-      (unless is-masked
-        (each span spans
-          (def y (+ (rect :y) (span :row)))
-          (for col (span :col-start) (span :col-end)
-            (def x (+ (rect :x) prompt-len col))
-            (def cell (tui/buffer-get buf x y))
-            (tui/buffer-set-char buf x y (cell :ch)
-              (tui/style-merge (cell :style) (span :style)))))))})
+             (unless is-masked
+               (each span spans
+                 (def y (+ (rect :y) (span :row)))
+                 (for col (span :col-start) (span :col-end)
+                   (def x (+ (rect :x) prompt-len col))
+                   (def cell (tui/buffer-get buf x y))
+                   (tui/buffer-set-char buf x y (cell :ch)
+                     (tui/style-merge (cell :style) (span :style)))))))})

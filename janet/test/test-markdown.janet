@@ -42,7 +42,7 @@
 (defn test-streaming-parser []
   (def output @[])
   (def parser (md/create-chat-markdown-parser 
-    (fn [line-spans] (array/push output line-spans))))
+               (fn [line-spans] (array/push output line-spans))))
   
   # Feed markdown text in chunks
   ((parser :feed) "#")

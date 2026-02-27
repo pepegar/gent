@@ -69,5 +69,5 @@
           (when (not (nil? result))
             (set last-result result)))
         ([err]
-          (eprintf "Hook error in %s: %s" (string event) (string err))))))
+         (eprintf "Hook error in %s: %s" (string event) (string err))))))
   last-result)

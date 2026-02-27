@@ -28,11 +28,11 @@
 
 (var- provider
   @{:stream-start (fn [conv tools cbs &opt sys]
-      (api/stream-start conv tools cbs sys))
+                   (api/stream-start conv tools cbs sys))
     :stream-read (fn [stream-id]
-      (http/stream-read stream-id))
+                  (http/stream-read stream-id))
     :stream-stop (fn [stream-id]
-      (http/stream-stop stream-id))})
+                  (http/stream-stop stream-id))})
 
 (defn set-provider
   "Replace the stream provider. p must have :stream-start, :stream-read, :stream-stop."
@@ -1006,49 +1006,49 @@
   (set stream-span-id (profile/begin "stream:api-call" "stream"))
   (def ctx
     ((provider :stream-start)
-      conversation
-      (tools/definitions)
-      @{:on-text (fn [text]
-          (when (thinking-state :active) (thinking-end-block))
-          (when (spinner-active?) (spinner-stop))
-          (stream-delta text))
-        :on-thinking (fn [text]
-          (thinking-delta text))
-        :on-tool-start (fn [name]
-          (stream-end-output)
-          (spinner-start (string "streaming " name " arguments…")))
-        :on-tool-delta (fn [name nbytes]
-          (def size-str
-            (if (>= nbytes 1024)
-              (string/format "%.1fKB" (/ nbytes 1024))
-              (string nbytes "B")))
-          (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
-        :on-error (fn [err]
-          (spinner-stop)
-          (output-error (string "Stream error: " err))
-          (hooks/run :on-error err))}
+     conversation
+     (tools/definitions)
+     @{:on-text (fn [text]
+                 (when (thinking-state :active) (thinking-end-block))
+                 (when (spinner-active?) (spinner-stop))
+                 (stream-delta text))
+       :on-thinking (fn [text]
+                     (thinking-delta text))
+       :on-tool-start (fn [name]
+                       (stream-end-output)
+                       (spinner-start (string "streaming " name " arguments…")))
+       :on-tool-delta (fn [name nbytes]
+                       (def size-str
+                         (if (>= nbytes 1024)
+                           (string/format "%.1fKB" (/ nbytes 1024))
+                           (string nbytes "B")))
+                       (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
+       :on-error (fn [err]
+                  (spinner-stop)
+                  (output-error (string "Stream error: " err))
+                  (hooks/run :on-error err))}
       effective-prompt))
   (set stream-ctx ctx)
   (set mode :streaming))
 
 (defn- drain-stream []
   (profile/with-span "stream:drain" "stream" (fn []
-    (def parser (stream-ctx :parser))
-    (def stream-id (get stream-ctx :stream-id))
-    (var result nil)
-    (var keep-going true)
-    (var budget 32)
-    (while (and keep-going (> budget 0))
-      (-- budget)
-      (def line ((provider :stream-read) stream-id))
-      (cond
-        (nil? line) (set keep-going false)
-        (= :done line) (do (set result :done) (set keep-going false))
-        (and (table? line) (= :error (get line :type)))
-        (do (output-error (string "Stream error: " (get line :message "unknown")))
-            (set result :error) (set keep-going false))
-        (string? line) ((parser :feed) line)))
-    result)))
+                                              (def parser (stream-ctx :parser))
+                                              (def stream-id (get stream-ctx :stream-id))
+                                              (var result nil)
+                                              (var keep-going true)
+                                              (var budget 32)
+                                              (while (and keep-going (> budget 0))
+                                                (-- budget)
+                                                (def line ((provider :stream-read) stream-id))
+                                                (cond
+                                                  (nil? line) (set keep-going false)
+                                                  (= :done line) (do (set result :done) (set keep-going false))
+                                                  (and (table? line) (= :error (get line :type)))
+                                                  (do (output-error (string "Stream error: " (get line :message "unknown")))
+                                                      (set result :error) (set keep-going false))
+                                                  (string? line) ((parser :feed) line)))
+                                              result)))
 
 # ── Tool execution ─────────────────────────────────────────────
 
@@ -1081,9 +1081,9 @@
   (try
     (start-streaming (conv/get-messages) effective-prompt)
     ([err]
-      (hooks/run :on-error err)
-      (output-error (string err))
-      (enter-idle))))
+     (hooks/run :on-error err)
+     (output-error (string err))
+     (enter-idle))))
 
 (defn- process-steering-or-idle []
   (if (not (empty? steering-queue))
@@ -1096,9 +1096,9 @@
       (try
         (start-streaming (conv/get-messages) effective-prompt)
         ([err]
-          (hooks/run :on-error err)
-          (output-error (string err))
-          (enter-idle))))
+         (hooks/run :on-error err)
+         (output-error (string err))
+         (enter-idle))))
     (enter-idle)))
 
 (set start-next-tool
@@ -1180,8 +1180,8 @@
         (try
           (start-streaming (conv/get-messages) effective-prompt)
           ([err]
-            (hooks/run :on-error err)
-            (output-error (string err))))))))
+           (hooks/run :on-error err)
+           (output-error (string err))))))))
 
 # ── Tool cancellation fix ─────────────────────────────────────
 
@@ -1219,8 +1219,8 @@
       (try
         (start-streaming (conv/get-messages) effective-prompt)
         ([err]
-          (hooks/run :on-error err)
-          (output-error (string err)))))
+         (hooks/run :on-error err)
+         (output-error (string err)))))
     (= mode :streaming)
     (array/push followup-queue text)
     (= mode :tools)
@@ -1437,47 +1437,47 @@
     :timers @[]
 
     :handle (fn [self event]
-      (def etype (get event :type))
-      (cond
-        (= etype :submit) (submit (event :text))
-        (= etype :stop) (stop)
-        (= etype :scroll-up)
-        (let [width (if (self :rect) ((self :rect) :width) 80)
-              height (if (self :rect) ((self :rect) :height) 10)
-              page-size (max 1 (- height 2))
-              max-offset (max 0 (- (total-visual-rows width) height))]
-          (set scroll-offset (min max-offset (+ scroll-offset page-size)))
-          (widget/mark-dirty :chat))
-        (= etype :scroll-down)
-        (do
-          (def page-size (if (self :rect) (max 1 (- ((self :rect) :height) 2)) 10))
-          (set scroll-offset (max 0 (- scroll-offset page-size)))
-          (widget/mark-dirty :chat))
-        (= etype :scroll-line-up)
-        (let [width (if (self :rect) ((self :rect) :width) 80)
-              height (if (self :rect) ((self :rect) :height) 10)
-              n (or (get event :lines) 1)
-              max-offset (max 0 (- (total-visual-rows width) height))
-              old-offset scroll-offset]
-          (set scroll-offset (min max-offset (+ scroll-offset n)))
-          (widget/mark-dirty :chat)
-          (def actual (- scroll-offset old-offset))
-          (when (> actual 0) [:scroll-optimized actual :up]))
-        (= etype :scroll-line-down)
-        (let [n (or (get event :lines) 1)
-              old-offset scroll-offset]
-          (set scroll-offset (max 0 (- scroll-offset n)))
-          (widget/mark-dirty :chat)
-          (def actual (- old-offset scroll-offset))
-          (when (> actual 0) [:scroll-optimized actual :down]))
-        (= etype :toggle-thinking)
-        (do
-          # Only toggle when idle to prevent rendering artifacts
-          (when (= mode :idle)
-            (def visible (toggle-thinking-visibility))
-            (output-info (string "Thinking blocks: " (if visible "visible" "hidden")))))))
+             (def etype (get event :type))
+             (cond
+               (= etype :submit) (submit (event :text))
+               (= etype :stop) (stop)
+               (= etype :scroll-up)
+               (let [width (if (self :rect) ((self :rect) :width) 80)
+                     height (if (self :rect) ((self :rect) :height) 10)
+                     page-size (max 1 (- height 2))
+                     max-offset (max 0 (- (total-visual-rows width) height))]
+                 (set scroll-offset (min max-offset (+ scroll-offset page-size)))
+                 (widget/mark-dirty :chat))
+               (= etype :scroll-down)
+               (do
+                 (def page-size (if (self :rect) (max 1 (- ((self :rect) :height) 2)) 10))
+                 (set scroll-offset (max 0 (- scroll-offset page-size)))
+                 (widget/mark-dirty :chat))
+               (= etype :scroll-line-up)
+               (let [width (if (self :rect) ((self :rect) :width) 80)
+                     height (if (self :rect) ((self :rect) :height) 10)
+                     n (or (get event :lines) 1)
+                     max-offset (max 0 (- (total-visual-rows width) height))
+                     old-offset scroll-offset]
+                 (set scroll-offset (min max-offset (+ scroll-offset n)))
+                 (widget/mark-dirty :chat)
+                 (def actual (- scroll-offset old-offset))
+                 (when (> actual 0) [:scroll-optimized actual :up]))
+               (= etype :scroll-line-down)
+               (let [n (or (get event :lines) 1)
+                     old-offset scroll-offset]
+                 (set scroll-offset (max 0 (- scroll-offset n)))
+                 (widget/mark-dirty :chat)
+                 (def actual (- old-offset scroll-offset))
+                 (when (> actual 0) [:scroll-optimized actual :down]))
+               (= etype :toggle-thinking)
+               (do
+                 # Only toggle when idle to prevent rendering artifacts
+                 (when (= mode :idle)
+                   (def visible (toggle-thinking-visibility))
+                   (output-info (string "Thinking blocks: " (if visible "visible" "hidden")))))))
 
     :update (fn [self] (tick))
 
     :render (fn [self rect buf]
-      (render-scrollback rect buf))})
+             (render-scrollback rect buf))})

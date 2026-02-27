@@ -57,7 +57,7 @@
           (try
             (hooks/run :after-tool-call name input coerced)
             ([err]
-              (eprintf "after-tool-call hook error for %s: %s" name (string err))))
+             (eprintf "after-tool-call hook error for %s: %s" name (string err))))
           coerced)))
     (string "Unknown tool: " name)))
 

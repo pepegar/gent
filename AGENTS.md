@@ -26,6 +26,21 @@ Rust provides low-level "syscalls" (terminal I/O, HTTP, process execution, JSON,
 - **Widgets**: The TUI is a widget system. `agent.janet` is the reactor loop that polls events, dispatches to widgets, and does double-buffered diff rendering.
 - **Config**: `~/.gent/init.janet` (user) and `.gent/init.janet` (project), loaded in `boot.janet`.
 
+### Janet code style (parinfer)
+
+Gent uses [parinfer](https://shaunlebron.github.io/parinfer/) to manage parentheses in Janet source files. The tool `parinfer-rust` is available in the dev shell (`nix develop`) and as a gent tool (`parinfer`).
+
+**How it works**: In Lisp, indentation and parentheses encode the same structure. Parinfer formalizes this — given correct indentation, it infers the right closing parens, and vice versa. We use **paren mode** for formatting: it adjusts indentation to match existing parentheses.
+
+**Rules for writing Janet code**:
+
+- **Two-space indent** is the convention. Nested forms indent two spaces from their parent.
+- **Indentation is structural** — it determines where expressions begin and end. Get indentation right and parens follow.
+- **Don't hand-tune trailing parens** at line ends. Parinfer rewrites them based on indentation. Stacking closing parens on their own line is never needed.
+- **One expression per line** when a form spans multiple lines. Align sibling arguments at the same column.
+- Run `parinfer-rust -m paren -l janet < file.janet` to check formatting, or use the `parinfer` tool inside a gent session.
+- CI runs `nix flake check` which verifies all `.janet` files pass parinfer paren mode.
+
 ## Building
 
 Requires Rust and Cargo:

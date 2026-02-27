@@ -91,8 +91,8 @@
   (try
     (set result (f))
     ([e]
-      (set err-val e)
-      (set errored true)))
+     (set err-val e)
+     (set errored true)))
   (end id)
   (when errored (error err-val))
   result)
@@ -113,8 +113,8 @@
   (try
     (set result (f))
     ([e]
-      (set err-val e)
-      (set errored true)))
+     (set err-val e)
+     (set errored true)))
   (end id)
   (when errored (error err-val))
   result)

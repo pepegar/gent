@@ -188,7 +188,7 @@
     (try
       (dispatch-method server method params)
       ([err]
-        @{:error @{:code rpc/internal-error :message (string err)}})))
+       @{:error @{:code rpc/internal-error :message (string err)}})))
   (when (not (rpc/notification? parsed))
     (def resp
       (if (get result :error)

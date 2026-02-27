@@ -65,7 +65,7 @@
           (dofile user-init-path)
           (array/push loaded-configs user-init-path))
         ([err]
-          (eprintf "Error loading %s: %s" user-init-path (string err)))))))
+         (eprintf "Error loading %s: %s" user-init-path (string err)))))))
 
 # Project config — load .gent/init.janet from cwd if it exists (like .dir-locals.el)
 (unless (dyn :gent/no-init)
@@ -76,7 +76,7 @@
         (dofile project-init-path)
         (array/push loaded-configs project-init-path))
       ([err]
-        (eprintf "Error loading %s: %s" project-init-path (string err))))))
+       (eprintf "Error loading %s: %s" project-init-path (string err))))))
 
 # Load files specified via -l / --load
 (when-let [load-files (dyn :gent/load-files)]
@@ -85,7 +85,7 @@
       (do (dofile f)
           (array/push loaded-configs f))
       ([err]
-        (eprintf "Error loading %s: %s" f (string err))))))
+       (eprintf "Error loading %s: %s" f (string err))))))
 
 # Stash loaded config paths for the startup banner
 (reg/set :loaded-configs loaded-configs)
