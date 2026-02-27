@@ -93,55 +93,204 @@
     (when all-digits
       (string/slice trimmed (+ dot-space 2)))))
 
+# ── Table parsing helpers ─────────────────────────────────────
+
+(defn- table-row? [trimmed]
+  "Check if a trimmed line looks like a markdown table row (has | delimiters)."
+  (and (string/has-prefix? "|" trimmed)
+       (string/has-suffix? "|" trimmed)
+       (> (length trimmed) 1)))
+
+(defn- table-separator? [trimmed]
+  "Check if a trimmed line is a table separator row (e.g. |---|---|)."
+  (and (table-row? trimmed)
+       (do
+         (var all-sep true)
+         (each byte trimmed
+           (unless (or (= byte (chr "|"))
+                       (= byte (chr "-"))
+                       (= byte (chr ":"))
+                       (= byte (chr " ")))
+             (set all-sep false)))
+         all-sep)
+       # Must have at least one --- segment
+       (not (nil? (string/find "-" trimmed)))))
+
+(defn- parse-table-cells [row-text]
+  "Parse a table row into an array of trimmed cell strings."
+  (def trimmed (string/trim row-text))
+  # Strip leading and trailing |
+  (def inner (string/slice trimmed 1 (- (length trimmed) 1)))
+  (def raw-cells (string/split "|" inner))
+  (map string/trim raw-cells))
+
+(defn- compute-col-widths [rows]
+  "Compute the max width per column across all rows."
+  (def ncols (length (first rows)))
+  (def widths (array/new ncols))
+  (for c 0 ncols (array/push widths 0))
+  (each row rows
+    (for c 0 (min ncols (length row))
+      (def w (length (get row c)))
+      (when (> w (get widths c))
+        (put widths c w))))
+  widths)
+
+(defn- pad-right [text width]
+  "Pad text with spaces to the given width."
+  (def need (- width (length text)))
+  (if (<= need 0)
+    text
+    (string text (string/repeat " " need))))
+
+(defn- render-table-line [cells widths cell-style]
+  "Render a table data row as a line with styled spans."
+  (def spans @[])
+  (def border-style (styles :list-marker))
+  (array/push spans (span "│" border-style))
+  (for c 0 (length cells)
+    (def cell-text (pad-right (get cells c) (get widths c)))
+    (array/push spans (span " " style-default))
+    (array/concat spans (parse-inline-spans cell-text cell-style))
+    (array/push spans (span " " style-default))
+    (array/push spans (span "│" border-style)))
+  (line ;spans))
+
+(defn- render-table-border [widths ch]
+  "Render a horizontal border line (top, middle, or bottom).
+   ch is the crossing character style: :top :mid :bot"
+  (def border-style (styles :list-marker))
+  (def [left cross right]
+    (case ch
+      :top ["┌" "┬" "┐"]
+      :mid ["├" "┼" "┤"]
+      :bot ["└" "┴" "┘"]))
+  (def spans @[])
+  (array/push spans (span left border-style))
+  (for c 0 (length widths)
+    (when (> c 0)
+      (array/push spans (span cross border-style)))
+    # +2 for the spaces on each side of cell content
+    (array/push spans (span (string/repeat "─" (+ (get widths c) 2)) border-style)))
+  (array/push spans (span right border-style))
+  (line ;spans))
+
+(defn- render-table [header-cells data-rows widths]
+  "Render a complete table as an array of lines."
+  (def result @[])
+  (array/push result (render-table-border widths :top))
+  (array/push result (render-table-line header-cells widths (styles :bold)))
+  (array/push result (render-table-border widths :mid))
+  (each row data-rows
+    (array/push result (render-table-line row widths style-default)))
+  (array/push result (render-table-border widths :bot))
+  result)
+
 # ── Complete markdown parsing (non-streaming) ──────────────────
+
+(defn- flush-table-rows [lines table-rows]
+  "Process accumulated table rows and append rendered lines."
+  (when (>= (length table-rows) 2)
+    (def first-row (get table-rows 0))
+    (def second-row (get table-rows 1))
+    (if (table-separator? (string/trim second-row))
+      (do
+        # Standard table: header + separator + data rows
+        (def header-cells (parse-table-cells first-row))
+        (def data-rows @[])
+        (for i 2 (length table-rows)
+          (def trimmed (string/trim (get table-rows i)))
+          (when (and (table-row? trimmed) (not (table-separator? trimmed)))
+            (array/push data-rows (parse-table-cells (get table-rows i)))))
+        (def all-rows @[header-cells ;data-rows])
+        (def widths (compute-col-widths all-rows))
+        (each ln (render-table header-cells data-rows widths)
+          (array/push lines ln)))
+      (do
+        # No separator — just render rows as plain data table (no header distinction)
+        (def all-cells @[])
+        (each row table-rows
+          (def trimmed (string/trim row))
+          (when (and (table-row? trimmed) (not (table-separator? trimmed)))
+            (array/push all-cells (parse-table-cells row))))
+        (when (> (length all-cells) 0)
+          (def widths (compute-col-widths all-cells))
+          (array/push lines (render-table-border widths :top))
+          (each row all-cells
+            (array/push lines (render-table-line row widths style-default)))
+          (array/push lines (render-table-border widths :bot))))))
+  # Edge case: single row (shouldn't happen normally, but be defensive)
+  (when (= (length table-rows) 1)
+    (def cells (parse-table-cells (get table-rows 0)))
+    (def widths (compute-col-widths @[cells]))
+    (array/push lines (render-table-border widths :top))
+    (array/push lines (render-table-line cells widths style-default))
+    (array/push lines (render-table-border widths :bot))))
 
 (defn markdown->lines [md-text]
   "Convert markdown text to a sequence of styled lines"
   (def lines @[])
   (def raw-lines (string/split "\n" md-text))
   (var in-code-block false)
+  (var table-rows @[])
 
   (each raw-line raw-lines
     (def trimmed (string/trim raw-line))
 
     (if (string/has-prefix? "```" trimmed)
       (do
+        # Flush any pending table
+        (when (> (length table-rows) 0)
+          (flush-table-rows lines table-rows)
+          (set table-rows @[]))
         (set in-code-block (not in-code-block))
         (array/push lines (line (span raw-line (styles :code-block)))))
       (if in-code-block
         (array/push lines (line (span raw-line (styles :code-block))))
-        (cond
-          # Empty line
-          (= trimmed "")
-          (array/push lines (line (span "" style-default)))
+        (if (table-row? trimmed)
+          # Accumulate table rows
+          (array/push table-rows raw-line)
+          (do
+            # Non-table line — flush any pending table first
+            (when (> (length table-rows) 0)
+              (flush-table-rows lines table-rows)
+              (set table-rows @[]))
+            (cond
+              # Empty line
+              (= trimmed "")
+              (array/push lines (line (span "" style-default)))
 
-          # Header (starts with #)
-          (string/has-prefix? "#" trimmed)
-          (let [space-pos (string/find " " trimmed)
-                level (if space-pos space-pos (length trimmed))
-                level (min 6 level)
-                text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
-                header-style (get styles (keyword "h" (string level)))]
-            (array/push lines (line ;(parse-inline-spans text header-style))))
+              # Header (starts with #)
+              (string/has-prefix? "#" trimmed)
+              (let [space-pos (string/find " " trimmed)
+                    level (if space-pos space-pos (length trimmed))
+                    level (min 6 level)
+                    text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
+                    header-style (get styles (keyword "h" (string level)))]
+                (array/push lines (line ;(parse-inline-spans text header-style))))
 
-          # Unordered list item (starts with -, *, +)
-          (or (string/has-prefix? "- " trimmed)
-              (string/has-prefix? "* " trimmed)
-              (string/has-prefix? "+ " trimmed))
-          (let [text (string/slice trimmed 2)]
-            (array/push lines (line (span "• " (styles :list-marker))
-                                    ;(parse-inline-spans text style-default))))
+              # Unordered list item (starts with -, *, +)
+              (or (string/has-prefix? "- " trimmed)
+                  (string/has-prefix? "* " trimmed)
+                  (string/has-prefix? "+ " trimmed))
+              (let [text (string/slice trimmed 2)]
+                (array/push lines (line (span "• " (styles :list-marker))
+                                        ;(parse-inline-spans text style-default))))
 
-          # Numbered list item
-          (numbered-list-text trimmed)
-          (let [text (numbered-list-text trimmed)
-                dot-pos (string/find ". " trimmed)
-                marker (string (string/slice trimmed 0 dot-pos) ". ")]
-            (array/push lines (line (span marker (styles :list-marker))
-                                    ;(parse-inline-spans text style-default))))
+              # Numbered list item
+              (numbered-list-text trimmed)
+              (let [text (numbered-list-text trimmed)
+                    dot-pos (string/find ". " trimmed)
+                    marker (string (string/slice trimmed 0 dot-pos) ". ")]
+                (array/push lines (line (span marker (styles :list-marker))
+                                        ;(parse-inline-spans text style-default))))
 
-          # Regular text — apply inline formatting
-          (array/push lines (line ;(parse-inline-spans raw-line style-default)))))))
+              # Regular text — apply inline formatting
+              (array/push lines (line ;(parse-inline-spans raw-line style-default)))))))))
+
+  # Flush any trailing table
+  (when (> (length table-rows) 0)
+    (flush-table-rows lines table-rows))
 
   lines)
 
@@ -224,16 +373,32 @@
 
   (def buffer @"")
   (var in-code-block false)
+  (var table-rows @[])
+
+  (def flush-table (fn []
+                    (when (> (length table-rows) 0)
+                      (def table-lines @[])
+                      (flush-table-rows table-lines table-rows)
+                      (each ln table-lines
+                        (output-callback (ln :spans)))
+                      (set table-rows @[]))))
 
   (def parse-line (fn [line-text]
                     (def trimmed (string/trim line-text))
                     (if (string/has-prefix? "```" trimmed)
                       (do
+                        (flush-table)
                         (set in-code-block (not in-code-block))
                         @[(span line-text (styles :code-block))])
                       (if in-code-block
                         @[(span line-text (styles :code-block))]
-                        (parse-line-spans line-text)))))
+                        (if (table-row? trimmed)
+                          (do
+                            (array/push table-rows line-text)
+                            nil)
+                          (do
+                            (flush-table)
+                            (parse-line-spans line-text)))))))
 
   (def feed-fn (fn [text]
                  (buffer/push buffer text)
@@ -245,7 +410,9 @@
 
                  (while pos
                    (def line-text (string/slice buf-str start pos))
-                   (output-callback (parse-line line-text))
+                   (def result (parse-line line-text))
+                   (when result
+                     (output-callback result))
                    (set start (+ pos 1))
                    (set pos (string/find "\n" buf-str start)))
 
@@ -258,7 +425,10 @@
   (def finish-fn (fn []
                    (def buf-str (string buffer))
                    (when (> (length buf-str) 0)
-                     (output-callback (parse-line buf-str)))
+                     (def result (parse-line buf-str))
+                     (when result
+                       (output-callback result)))
+                   (flush-table)
                    (buffer/clear buffer)))
 
   @{:feed feed-fn :finish finish-fn})

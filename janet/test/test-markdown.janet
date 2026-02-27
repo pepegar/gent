@@ -187,6 +187,121 @@
   (t/assert= 1 (length code-spans))
   (t/assert= "(def idx (+ (* row w) col))" ((get code-spans 0) :text)))
 
+(defn test-table-basic []
+  (def sample "| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob | 25 |")
+  (def lines (md/markdown->lines sample))
+  # Should produce: top border, header, mid border, 2 data rows, bottom border = 6 lines
+  (t/assert= 6 (length lines))
+  # Check top border has box-drawing characters
+  (def top-text (string ;(map |($ :text) ((get lines 0) :spans))))
+  (t/assert-truthy (string/find "┌" top-text))
+  (t/assert-truthy (string/find "┬" top-text))
+  (t/assert-truthy (string/find "┐" top-text))
+  # Check header row contains cell text
+  (def header-text (string ;(map |($ :text) ((get lines 1) :spans))))
+  (t/assert-truthy (string/find "Name" header-text))
+  (t/assert-truthy (string/find "Age" header-text))
+  # Check header is bold
+  (var found-bold false)
+  (each s ((get lines 1) :spans)
+    (when (and (string/find "Name" (s :text))
+               (get (s :style) :bold))
+      (set found-bold true)))
+  (t/assert-truthy found-bold)
+  # Check middle border
+  (def mid-text (string ;(map |($ :text) ((get lines 2) :spans))))
+  (t/assert-truthy (string/find "├" mid-text))
+  (t/assert-truthy (string/find "┼" mid-text))
+  # Check data rows
+  (def row1-text (string ;(map |($ :text) ((get lines 3) :spans))))
+  (t/assert-truthy (string/find "Alice" row1-text))
+  (def row2-text (string ;(map |($ :text) ((get lines 4) :spans))))
+  (t/assert-truthy (string/find "Bob" row2-text))
+  # Check bottom border
+  (def bot-text (string ;(map |($ :text) ((get lines 5) :spans))))
+  (t/assert-truthy (string/find "└" bot-text))
+  (t/assert-truthy (string/find "┴" bot-text))
+  (t/assert-truthy (string/find "┘" bot-text)))
+
+(defn test-table-column-alignment []
+  (def sample "| Short | A much longer column |\n|-------|----------------------|\n| x | y |")
+  (def lines (md/markdown->lines sample))
+  (t/assert= 5 (length lines))
+  # The columns should be padded to align
+  (def header-text (string ;(map |($ :text) ((get lines 1) :spans))))
+  (def data-text (string ;(map |($ :text) ((get lines 3) :spans))))
+  # Both rows should have the same total width (same border positions)
+  (t/assert= (length header-text) (length data-text)))
+
+(defn test-table-inline-formatting []
+  (def sample "| Name | Status |\n|------|--------|\n| Alice | **active** |")
+  (def lines (md/markdown->lines sample))
+  (t/assert= 5 (length lines))
+  # Data row should have bold "active"
+  (var found-bold false)
+  (each s ((get lines 3) :spans)
+    (when (and (string/find "active" (s :text))
+               (get (s :style) :bold))
+      (set found-bold true)))
+  (t/assert-truthy found-bold))
+
+(defn test-table-mixed-with-text []
+  (def sample "Some text before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nSome text after")
+  (def lines (md/markdown->lines sample))
+  # Should have: text, blank, table (5 lines), blank, text = 9
+  (t/assert= 9 (length lines))
+  (def first-text (string ;(map |($ :text) ((get lines 0) :spans))))
+  (t/assert-truthy (string/find "Some text before" first-text))
+  (def last-text (string ;(map |($ :text) ((get lines 8) :spans))))
+  (t/assert-truthy (string/find "Some text after" last-text)))
+
+(defn test-table-at-end-of-text []
+  (def sample "Here is a table:\n| X | Y |\n|---|---|\n| 1 | 2 |")
+  (def lines (md/markdown->lines sample))
+  # text + table (5 lines) = 6
+  (t/assert= 6 (length lines))
+  (def first-text (string ;(map |($ :text) ((get lines 0) :spans))))
+  (t/assert-truthy (string/find "Here is a table:" first-text)))
+
+(defn test-table-streaming []
+  (def output @[])
+  (def parser (md/create-chat-markdown-parser
+                (fn [spans] (array/push output spans))))
+  ((parser :feed) "| Name | Age |\n")
+  ((parser :feed) "|------|-----|\n")
+  ((parser :feed) "| Alice | 30 |\n")
+  ((parser :feed) "| Bob | 25 |\n")
+  ((parser :feed) "\n")
+  ((parser :finish))
+  # Table should be flushed when the empty line arrives
+  # 6 table lines + 1 empty line = 7
+  (t/assert= 7 (length output))
+  # First line should be top border
+  (def top-text (string ;(map |($ :text) (get output 0))))
+  (t/assert-truthy (string/find "┌" top-text))
+  # Second line should have header text
+  (def header-text (string ;(map |($ :text) (get output 1))))
+  (t/assert-truthy (string/find "Name" header-text)))
+
+(defn test-table-streaming-at-finish []
+  (def output @[])
+  (def parser (md/create-chat-markdown-parser
+                (fn [spans] (array/push output spans))))
+  ((parser :feed) "| A | B |\n|---|---|\n| 1 | 2 |\n")
+  ((parser :finish))
+  # Table flushed on finish: 5 lines
+  (t/assert= 5 (length output))
+  (def top-text (string ;(map |($ :text) (get output 0))))
+  (t/assert-truthy (string/find "┌" top-text)))
+
+(defn test-table-ansi-output []
+  (def sample "| A | B |\n|---|---|\n| 1 | 2 |")
+  (def ansi (md/markdown->ansi sample))
+  (t/assert-truthy (string/find "A" ansi))
+  (t/assert-truthy (string/find "B" ansi))
+  (t/assert-truthy (string/find "1" ansi))
+  (t/assert-truthy (string/find "2" ansi)))
+
 # Run tests
 (t/test "basic parsing" test-basic-parsing)
 (t/test "list items" test-list-items)
@@ -204,3 +319,11 @@
 (t/test "streaming numbered list" test-streaming-numbered-list)
 (t/test "code block preserves asterisks" test-code-block-preserves-asterisks)
 (t/test "streaming code block preserves asterisks" test-streaming-code-block-preserves-asterisks)
+(t/test "table basic" test-table-basic)
+(t/test "table column alignment" test-table-column-alignment)
+(t/test "table inline formatting" test-table-inline-formatting)
+(t/test "table mixed with text" test-table-mixed-with-text)
+(t/test "table at end of text" test-table-at-end-of-text)
+(t/test "table streaming" test-table-streaming)
+(t/test "table streaming at finish" test-table-streaming-at-finish)
+(t/test "table ansi output" test-table-ansi-output)
