@@ -41,6 +41,16 @@
     (put buf :dirty-rows dr))
   buf)
 
+(defn buffer-clear
+  [buf]
+  (def cells (buf :cells))
+  (each c cells
+    (put c :ch " ")
+    (put c :style style-default))
+  (when-let [dr (buf :dirty-rows)]
+    (for i 0 (length dr) (put dr i true)))
+  buf)
+
 (defn- buf-idx
   "Compute the flat index for (x, y) within a buffer."
   [buf x y]

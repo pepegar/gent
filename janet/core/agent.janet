@@ -60,6 +60,7 @@
 
 (var- prev-buf nil)
 (var- screen-area nil)
+(var- widget-bufs @{})
 (var- popup-was-visible false)
 (var- pending-scroll-opt nil)
 (var- should-quit false)
@@ -97,7 +98,8 @@
     (term/write (string/format "\x1b[%dS" delta)))
   (term/write "\x1b[r")
 
-  # Shift prev-buf cells within the chat rect
+  # Shift prev-buf cells within the chat rect (copy values, not references,
+  # to avoid aliasing bugs when the diff later updates cells in-place)
   (if (= direction :up)
     (do
       # Content moves DOWN: shift rows down, new content at top
@@ -106,23 +108,33 @@
         (for col 0 rw
           (def src-idx (+ (* (+ ry (- row delta)) pw) rx col))
           (def dst-idx (+ (* (+ ry row) pw) rx col))
-          (put cells dst-idx (get cells src-idx)))
+          (def src (get cells src-idx))
+          (def dst (get cells dst-idx))
+          (put dst :ch (src :ch))
+          (put dst :style (src :style)))
         (-- row))
       (for row 0 delta
         (for col 0 rw
           (def idx (+ (* (+ ry row) pw) rx col))
-          (put cells idx @{:ch " " :style tui/style-default}))))
+          (def c (get cells idx))
+          (put c :ch " ")
+          (put c :style tui/style-default))))
     (do
       # Content moves UP: shift rows up, new content at bottom
       (for row 0 (- rh delta)
         (for col 0 rw
           (def src-idx (+ (* (+ ry (+ row delta)) pw) rx col))
           (def dst-idx (+ (* (+ ry row) pw) rx col))
-          (put cells dst-idx (get cells src-idx))))
+          (def src (get cells src-idx))
+          (def dst (get cells dst-idx))
+          (put dst :ch (src :ch))
+          (put dst :style (src :style))))
       (for row (- rh delta) rh
         (for col 0 rw
           (def idx (+ (* (+ ry row) pw) rx col))
-          (put cells idx @{:ch " " :style tui/style-default})))))
+          (def c (get cells idx))
+          (put c :ch " ")
+          (put c :style tui/style-default)))))
 
   (set pending-scroll-opt {:delta delta :direction direction :height rh})
   true)
@@ -136,8 +148,8 @@
   (set screen-area area)
   (widget/do-layout area)
   (sync-ui-layout)
-  # Reset double-buffering on resize (full redraw)
-  (set prev-buf nil))
+  (set prev-buf nil)
+  (set widget-bufs @{}))
 
 (defn- render-frame
   "Render dirty widgets, diff against previous frame, flush."
@@ -172,7 +184,13 @@
         (when-let [w (widget/get-widget name)]
           (when (and (w :dirty) (w :rect) (w :render))
             (def r (w :rect))
-            (def small-buf (tui/buffer r true))
+            (def cached (get widget-bufs name))
+            (def small-buf
+              (if (and cached (= (cached :area) r))
+                (tui/buffer-clear cached)
+                (let [b (tui/buffer r true)]
+                  (put widget-bufs name b)
+                  b)))
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w r small-buf)))
             (put w :dirty false)
@@ -556,6 +574,10 @@
 
       # 5. Update all widgets (chat drains stream, polls tools)
                                                    (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
+
+      # 5b. Drain stream scroll counter (consumed but not used for scroll-region
+      # optimization during streaming — the buffer-reset-dirty path handles it)
+                                                   (chat/drain-stream-scroll)
 
       # 6. Tick widget timers
                                                    (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))

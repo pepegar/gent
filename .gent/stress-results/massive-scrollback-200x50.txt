@@ -1,0 +1,143 @@
+--- Initial screen ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+gent — the extensible coding agent
+  8 tools loaded — ctrl-c to quit
+  15 skills:
+    • db-test — /Users/pepe/.agents/skills/db-test
+    • janet — /Users/pepe/.agents/skills/janet
+    • jira — /Users/pepe/.agents/skills/jira
+    • kickoff — /Users/pepe/.agents/skills/kickoff
+    • math-vault — /Users/pepe/.agents/skills/math-vault
+    • mermaid — /Users/pepe/.agents/skills/mermaid
+    • obsidian-cli — /Users/pepe/.agents/skills/obsidian-cli
+    • pdf — /Users/pepe/.agents/skills/pdf
+    • review-pr — /Users/pepe/.agents/skills/review-pr
+    • run-tests — /Users/pepe/.agents/skills/run-tests
+    • spawn-agent — /Users/pepe/.agents/skills/spawn-agent
+    • spicedb — /Users/pepe/.agents/skills/spicedb
+    • tui-wright — /Users/pepe/.agents/skills/tui-wright
+    • worktree — /Users/pepe/.agents/skills/worktree
+    • zellij — /Users/pepe/.agents/skills/zellij
+  2 AGENTS.md:
+    • /Users/pepe/projects/github.com/pepegar/gent/AGENTS.md
+    • /Users/pepe/.agents/AGENTS.md
+  2 config:
+    • /Users/pepe/.gent/init.janet
+    • .gent/init.janet
+  session: 20260226-190604-0001
+
+── session: 20260226-190604-0001 │ 0 msgs ≈ 0 tokens ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+--- Scroll up stress (100 events) ---
+--- Scroll down stress (100 events) ---
+--- Alternating scroll stress (50 pairs) ---
+
+=== PROFILING STATS ===
+▐         • Item 490: Sed do eiusmod tempor
+▐
+▐         Line 489: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Section 49
+▐
+▐         Here is a bold statement with italic and `inline code` on line 491. This is a fairly long line that should cause word wrapping in a typical terminal window of around 100 columns wide.
+▐
+▐         Line 492: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 493: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 494: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         ```python
+▐         def function_495(x, y):
+▐             return x + y  495
+▐         ```
+▐
+▐         Line 496: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 497: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         • Item 498: Lorem ipsum dolor sit amet
+▐         • Item 499: Consectetur adipiscing elit
+▐         • Item 500: Sed do eiusmod tempor
+▐
+▐         Line 499: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+
+
+▐   user: /profile reset
+Profiling data cleared.
+
+▐   user: /profile reset
+Profiling data cleared.
+
+▐   user: /profile stats
+Profiling: 3.3s, 714 events
+
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+event:key                    1        0.1       0.1       0.1       0.1
+event:poll                 102     3058.9      30.0       2.5    2028.9
+event:scroll               100        0.3       0.0       0.0       0.0
+reactor:loop               101     3263.2      32.3       4.7    2029.5
+render:chat                101       96.9       1.0       0.8       1.9
+render:editor                2        0.1       0.0       0.0       0.0
+render:frame               102      142.8       1.4       0.5       8.2
+render:separator             1        0.2       0.2       0.2       0.2
+widget:tick-timers         102        0.1       0.0       0.0       0.0
+widget:update-all          102        0.2       0.0       0.0       0.0
+── session: 20260226-190604-0001 │ 2 msgs ≈ 11948 tokens ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+=== FINAL SCREEN ===
+▐
+▐         Here is a bold statement with italic and `inline code` on line 491. This is a fairly long line that should cause word wrapping in a typical terminal window of around 100 columns wide.
+▐
+▐         Line 492: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 493: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 494: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         ```python
+▐         def function_495(x, y):
+▐             return x + y  495
+▐         ```
+▐
+▐         Line 496: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         Line 497: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+▐         • Item 498: Lorem ipsum dolor sit amet
+▐         • Item 499: Consectetur adipiscing elit
+▐         • Item 500: Sed do eiusmod tempor
+▐
+▐         Line 499: The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+
+
+▐   user: /profile reset
+Profiling data cleared.
+
+▐   user: /profile reset
+Profiling data cleared.
+
+▐   user: /profile stats
+Profiling: 3.3s, 714 events
+
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+event:key                    1        0.1       0.1       0.1       0.1
+event:poll                 102     3058.9      30.0       2.5    2028.9
+event:scroll               100        0.3       0.0       0.0       0.0
+reactor:loop               101     3263.2      32.3       4.7    2029.5
+render:chat                101       96.9       1.0       0.8       1.9
+render:editor                2        0.1       0.0       0.0       0.0
+render:frame               102      142.8       1.4       0.5       8.2
+render:separator             1        0.2       0.2       0.2       0.2
+widget:tick-timers         102        0.1       0.0       0.0       0.0
+widget:update-all          102        0.2       0.0       0.0       0.0
+
+▐   user: /profile dump
+Trace written to: .gent/profile-20260226-190604-0001.json
+Open in https://speedscope.app
+── session: 20260226-190604-0001 │ 2 msgs ≈ 11948 tokens ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -4,20 +4,94 @@
 (use ./style)
 (use ./buffer)
 
-# Style definitions
-(def- styles
-  {:h1 (style :fg :bright-white :bold true)
-   :h2 (style :fg :bright-white :bold true)
-   :h3 (style :fg :white :bold true)
-   :h4 (style :fg :white :bold true)
-   :h5 (style :fg :white)
-   :h6 (style :fg :white)
-   :bold (style :bold true)
-   :italic (style :italic true)
-   :code (style :fg :cyan :bg :bright-black)
-   :link (style :fg :blue :underline true)
-   :list-marker (style :fg :yellow)
-   :code-block (style :fg :cyan :bg :bright-black)})
+# Style definitions — mutable so themes can update them at runtime.
+# Dark-mode defaults; call (set-md-styles overrides) to adapt for light mode.
+(def styles
+  @{:h1 (style :fg :bright-white :bold true)
+    :h2 (style :fg :bright-white :bold true)
+    :h3 (style :fg :white :bold true)
+    :h4 (style :fg :white :bold true)
+    :h5 (style :fg :white)
+    :h6 (style :fg :white)
+    :bold (style :bold true)
+    :italic (style :italic true)
+    :bold-italic (style :bold true :italic true)
+    :code (style :fg :cyan :bg :bright-black)
+    :link (style :fg :blue :underline true)
+    :list-marker (style :fg :yellow)
+    :code-block (style :fg :cyan :bg :bright-black)})
+
+(defn set-md-styles
+  "Merge overrides into the active markdown styles table.
+   Called by the theme system when switching dark/light."
+  [overrides]
+  (eachp [k v] overrides
+    (put styles k v)))
+
+# ── Inline formatting parser ──────────────────────────────────
+
+(defn- compute-inline-style [bold italic base-style]
+  (cond
+    (and bold italic) (styles :bold-italic)
+    bold (styles :bold)
+    italic (styles :italic)
+    base-style))
+
+(defn- parse-inline-spans [text base-style]
+  "Parse inline markdown (bold, italic) and return an array of spans.
+   Handles **bold**, *italic*, and ***bold+italic***."
+  (if (not (string/find "*" text))
+    @[(span text base-style)]
+    (do
+      (def result @[])
+      (var pos 0)
+      (var bold false)
+      (var italic false)
+      (def buf @"")
+      (def len (length text))
+
+      (while (< pos len)
+        (def ch (get text pos))
+        (if (= ch (chr "*"))
+          (do
+            # Count consecutive *s
+            (var star-count 0)
+            (while (and (< (+ pos star-count) len)
+                        (= (get text (+ pos star-count)) (chr "*")))
+              (++ star-count))
+            # Flush current buffer
+            (when (> (length buf) 0)
+              (array/push result (span (string buf) (compute-inline-style bold italic base-style)))
+              (buffer/clear buf))
+            # Toggle formatting based on star count
+            (cond
+              (>= star-count 3) (do (set bold (not bold)) (set italic (not italic)))
+              (= star-count 2) (set bold (not bold))
+              (set italic (not italic)))
+            (set pos (+ pos star-count)))
+          (do
+            (buffer/push buf ch)
+            (++ pos))))
+
+      # Flush remaining
+      (when (> (length buf) 0)
+        (array/push result (span (string buf) (compute-inline-style bold italic base-style))))
+
+      (if (empty? result)
+        @[(span text base-style)]
+        result))))
+
+(defn- numbered-list-text [trimmed]
+  "If trimmed is a numbered list item (e.g. '1. text'), return the text. Otherwise nil."
+  (def dot-space (string/find ". " trimmed))
+  (when (and dot-space (> dot-space 0))
+    (def prefix (string/slice trimmed 0 dot-space))
+    (var all-digits true)
+    (each byte prefix
+      (when (or (< byte (chr "0")) (> byte (chr "9")))
+        (set all-digits false)))
+    (when all-digits
+      (string/slice trimmed (+ dot-space 2)))))
 
 # ── Complete markdown parsing (non-streaming) ──────────────────
 
@@ -41,22 +115,30 @@
             level (min 6 level)
             text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
             header-style (get styles (keyword "h" (string level)))]
-        (array/push lines (line (span text header-style))))
+        (array/push lines (line ;(parse-inline-spans text header-style))))
 
-      # List item (starts with -, *, +)
+      # Unordered list item (starts with -, *, +)
       (or (string/has-prefix? "- " trimmed)
           (string/has-prefix? "* " trimmed)
           (string/has-prefix? "+ " trimmed))
       (let [text (string/slice trimmed 2)]
         (array/push lines (line (span "• " (styles :list-marker))
-                                (span text style-default))))
+                                ;(parse-inline-spans text style-default))))
+
+      # Numbered list item
+      (numbered-list-text trimmed)
+      (let [text (numbered-list-text trimmed)
+            dot-pos (string/find ". " trimmed)
+            marker (string (string/slice trimmed 0 dot-pos) ". ")]
+        (array/push lines (line (span marker (styles :list-marker))
+                                ;(parse-inline-spans text style-default))))
 
       # Code block (starts with ```)
       (string/has-prefix? "```" trimmed)
       (array/push lines (line (span raw-line (styles :code-block))))
 
-      # Regular text
-      (array/push lines (line (span raw-line style-default)))))
+      # Regular text — apply inline formatting
+      (array/push lines (line ;(parse-inline-spans raw-line style-default)))))
 
   lines)
 
@@ -92,6 +174,46 @@
 
 # ── Simple streaming parser ────────────────────────────────────
 
+(defn- parse-line-spans [line-text]
+  "Parse a single line of markdown into an array of spans."
+  (def trimmed (string/trim line-text))
+  (cond
+    # Empty line
+    (= trimmed "")
+    @[(span "" style-default)]
+
+    # Header
+    (string/has-prefix? "#" trimmed)
+    (let [space-pos (string/find " " trimmed)
+          level (if space-pos space-pos (length trimmed))
+          level (min 6 level)
+          text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
+          header-style (get styles (keyword "h" (string level)))]
+      (parse-inline-spans text header-style))
+
+    # Unordered list item
+    (or (string/has-prefix? "- " trimmed)
+        (string/has-prefix? "* " trimmed)
+        (string/has-prefix? "+ " trimmed))
+    (let [text (string/slice trimmed 2)]
+      (array/concat @[(span "• " (styles :list-marker))]
+                    (parse-inline-spans text style-default)))
+
+    # Numbered list item
+    (numbered-list-text trimmed)
+    (let [text (numbered-list-text trimmed)
+          dot-pos (string/find ". " trimmed)
+          marker (string (string/slice trimmed 0 dot-pos) ". ")]
+      (array/concat @[(span marker (styles :list-marker))]
+                    (parse-inline-spans text style-default)))
+
+    # Code block
+    (string/has-prefix? "```" trimmed)
+    @[(span line-text (styles :code-block))]
+
+    # Regular text — apply inline formatting
+    (parse-inline-spans line-text style-default)))
+
 (defn create-chat-markdown-parser [output-callback]
   "Create a streaming markdown parser for chat integration.
    Processes complete lines and calls output-callback with span arrays."
@@ -108,40 +230,7 @@
 
                  (while pos
                    (def line-text (string/slice buf-str start pos))
-                   (def trimmed (string/trim line-text))
-
-                   # Create spans for this line
-                   (def spans
-                     (cond
-                       # Empty line
-                       (= trimmed "")
-                       @[(span "" style-default)]
-
-                       # Header
-                       (string/has-prefix? "#" trimmed)
-                       (let [space-pos (string/find " " trimmed)
-                             level (if space-pos space-pos (length trimmed))
-                             level (min 6 level)
-                             text (if space-pos (string/trim (string/slice trimmed level)) trimmed)
-                             header-style (get styles (keyword "h" (string level)))]
-                         @[(span text header-style)])
-
-                       # List item
-                       (or (string/has-prefix? "- " trimmed)
-                           (string/has-prefix? "* " trimmed)
-                           (string/has-prefix? "+ " trimmed))
-                       (let [text (string/slice trimmed 2)]
-                         @[(span "• " (styles :list-marker))
-                           (span text style-default)])
-
-                       # Code block
-                       (string/has-prefix? "```" trimmed)
-                       @[(span line-text (styles :code-block))]
-
-                       # Regular text
-                       @[(span line-text style-default)]))
-
-                   (output-callback spans)
+                   (output-callback (parse-line-spans line-text))
                    (set start (+ pos 1))
                    (set pos (string/find "\n" buf-str start)))
 
@@ -154,10 +243,10 @@
   (def finish-fn (fn []
                    (def buf-str (string buffer))
                    (when (> (length buf-str) 0)
-                     (output-callback @[(span buf-str style-default)]))
+                     (output-callback (parse-line-spans buf-str)))
                    (buffer/clear buffer)))
 
   @{:feed feed-fn :finish finish-fn})
 
-# Export convenience
+# Export convenience — md-styles is an alias for the (now mutable) styles table.
 (def md-styles styles)

@@ -16,17 +16,11 @@ Requires parinfer-rust to be on PATH (available via nix develop).```
                (unless (os/stat path)
                  (error (string "file not found: " path)))
                (def content (slurp path))
-               (def proc (os/spawn ["parinfer-rust" "-m" "paren" "-l" "janet"]
-                                   :p {:in :pipe :out :pipe}))
-               (:write (proc :in) content)
-               (:close (proc :in))
-               (def out @"")
-               (var chunk (:read (proc :out) 4096))
-               (while chunk
-                 (buffer/push out chunk)
-                 (set chunk (:read (proc :out) 4096)))
-               (os/proc-wait proc)
-               (def formatted (string out))
+               (def result (process/exec "bash" ["-c" (string "parinfer-rust -m paren -l janet --no-janet-long-strings < " (string/format "%q" path))]))
+               (when (not= 0 (get result :status))
+                 (def err (string (get result :stderr) (get result :stdout)))
+                 (error (string "parinfer-rust failed: " (string/trim err))))
+               (def formatted (get result :stdout))
                (if (= content formatted)
                  (string path " is already well-formatted")
                  (do

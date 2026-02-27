@@ -145,7 +145,7 @@
           for f in $(find "$src/janet" -name '*.janet'); do
             name="''${f#$src/}"
             tmpfile=$(mktemp)
-            if ! ${parinfer}/bin/parinfer-rust --mode paren --language janet < "$f" > "$tmpfile" 2>/dev/null; then
+            if ! ${parinfer}/bin/parinfer-rust --mode paren --language janet --no-janet-long-strings < "$f" > "$tmpfile" 2>/dev/null; then
               echo "SKIP: $name (parinfer-rust cannot process this file)"
               skipped=$((skipped + 1))
               rm -f "$tmpfile"

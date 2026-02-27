@@ -185,6 +185,9 @@
 (var- scrollback @[])
 (var- scroll-offset 0)     # 0 = pinned to bottom, >0 = scrolled up
 (var- max-scrollback 10000)
+(var- cached-total-vrows 0)
+(var- cached-vrows-width 0)
+(var- stream-new-vrows 0)
 
 # ── State accessors (for testing and introspection) ────────────
 
@@ -204,13 +207,27 @@
   "Return the current chat mode (:idle, :streaming, or :tools)."
   [] mode)
 
+(defn drain-stream-scroll
+  "Return and clear the count of new visual rows added during streaming."
+  []
+  (def n stream-new-vrows)
+  (set stream-new-vrows 0)
+  n)
+
 (var- thinking-state @{:active false :buf @"" :visible false :char-count 0})
+(var- scrollback-dirty true)
+(var- prev-y-offset -1)
 
 (defn reset-state
   "Reset chat state for testing. Clears scrollback, resets mode to idle."
   []
   (array/clear scrollback)
   (set scroll-offset 0)
+  (set cached-total-vrows 0)
+  (set cached-vrows-width 0)
+  (set stream-new-vrows 0)
+  (set scrollback-dirty true)
+  (set prev-y-offset -1)
   (set mode :idle)
   (set stream-ctx nil)
   (array/clear steering-queue)
@@ -250,6 +267,17 @@
       :tool-error-bg   (tui/style :bg [:rgb 62 30 44])              # Deeper red
       :bash-exit-fail  (tui/style :fg [:rgb 243 139 168] :bold true) # Red (same as error-label)
       :bash-prompt     (tui/style :fg [:rgb 166 227 161])            # Green (dimmer than label)
+      # Markdown heading/inline styles
+      :md-h1         (tui/style :fg [:rgb 205 214 244] :bold true)   # Text – max contrast
+      :md-h2         (tui/style :fg [:rgb 180 190 254] :bold true)   # Lavender
+      :md-h3         (tui/style :fg [:rgb 148 226 213] :bold true)   # Teal
+      :md-h4         (tui/style :fg [:rgb 137 180 250] :bold true)   # Blue
+      :md-h5         (tui/style :fg [:rgb 166 173 200])              # Subtext0
+      :md-h6         (tui/style :fg [:rgb 147 153 178])              # Overlay2
+      :md-code       (tui/style :fg [:rgb 148 226 213] :bg [:rgb 49 50 68]) # Teal on Surface0
+      :md-link       (tui/style :fg [:rgb 137 180 250] :underline true) # Blue
+      :md-list-marker (tui/style :fg [:rgb 249 226 175])             # Yellow
+      :md-code-block (tui/style :fg [:rgb 148 226 213] :bg [:rgb 49 50 68]) # Teal on Surface0
       :reset        (tui/style)}
 
     :light
@@ -274,11 +302,33 @@
       :tool-error-bg   (tui/style :bg [:rgb 246 218 224])           # Deeper red
       :bash-exit-fail  (tui/style :fg [:rgb 210 15 57] :bold true)   # Red (same as error-label)
       :bash-prompt     (tui/style :fg [:rgb 64 160 43])              # Green (dimmer than label)
+      # Markdown heading/inline styles
+      :md-h1         (tui/style :fg [:rgb 76 79 105] :bold true)    # Text – max contrast
+      :md-h2         (tui/style :fg [:rgb 114 105 189] :bold true)  # Lavender
+      :md-h3         (tui/style :fg [:rgb 23 146 153] :bold true)   # Teal
+      :md-h4         (tui/style :fg [:rgb 30 102 245] :bold true)   # Blue
+      :md-h5         (tui/style :fg [:rgb 108 111 133])             # Subtext0
+      :md-h6         (tui/style :fg [:rgb 124 127 147])             # Overlay2
+      :md-code       (tui/style :fg [:rgb 23 146 153] :bg [:rgb 204 208 218]) # Teal on Surface0
+      :md-link       (tui/style :fg [:rgb 30 102 245] :underline true) # Blue
+      :md-list-marker (tui/style :fg [:rgb 223 142 29])             # Yellow
+      :md-code-block (tui/style :fg [:rgb 23 146 153] :bg [:rgb 204 208 218]) # Teal on Surface0
       :reset        (tui/style)}})
 
 (def- colors
   "Active color scheme. Starts as a copy of the dark theme."
   (table/clone (themes :dark)))
+
+(defn- sync-md-styles
+  "Push the :md-* keys from the active color scheme to tui/markdown."
+  [theme]
+  (def md-overrides @{})
+  (eachp [k v] theme
+    (when (string/has-prefix? "md-" (string k))
+      (def short-key (keyword (string/slice (string k) 3)))
+      (put md-overrides short-key v)))
+  (when (next md-overrides)
+    (md/set-md-styles md-overrides)))
 
 (defn set-theme
   "Apply a built-in theme (:dark or :light). Call from ~/.gent/init.janet."
@@ -286,7 +336,8 @@
   (def theme (get themes name))
   (when (nil? theme) (error (string "unknown theme: " name)))
   (eachp [k _] colors (put colors k nil))
-  (eachp [k v] theme (put colors k v)))
+  (eachp [k v] theme (put colors k v))
+  (sync-md-styles theme))
 
 (defn set-colors
   "Override individual color entries on top of the current theme."
@@ -394,12 +445,17 @@
   (if (line :row-style) (- width 1) width))
 
 (defn- total-visual-rows
-  "Count total visual rows across all scrollback lines at given width."
+  "Cached total visual rows. Recomputes on width change."
   [width]
-  (var total 0)
-  (each line scrollback
-    (set total (+ total (count-visual-rows line (effective-width line width)))))
-  total)
+  (if (= cached-vrows-width width)
+    cached-total-vrows
+    (do
+      (var total 0)
+      (each line scrollback
+        (set total (+ total (count-visual-rows line (effective-width line width)))))
+      (set cached-total-vrows total)
+      (set cached-vrows-width width)
+      total)))
 
 # ── Output helpers (scrollback-based) ─────────────────────────
 
@@ -411,12 +467,19 @@
   (default style (tui/style))
   (def new-line @{:text text :style style})
   (array/push scrollback new-line)
+  (set scrollback-dirty true)
+  (when (> cached-vrows-width 0)
+    (def ew (effective-width new-line cached-vrows-width))
+    (set cached-total-vrows (+ cached-total-vrows (count-visual-rows new-line ew))))
   (when (> scroll-offset 0)
     (def w (widget/get-widget :chat))
     (def width (if (and w (w :rect)) ((w :rect) :width) 80))
     (set scroll-offset (+ scroll-offset (count-visual-rows new-line width))))
-  # Cap scrollback size
   (when (> (length scrollback) max-scrollback)
+    (when (> cached-vrows-width 0)
+      (def old-line (get scrollback 0))
+      (def ew (effective-width old-line cached-vrows-width))
+      (set cached-total-vrows (- cached-total-vrows (count-visual-rows old-line ew))))
     (array/remove scrollback 0 (- (length scrollback) max-scrollback)))
   (widget/mark-dirty :chat))
 
@@ -426,11 +489,22 @@
   [spans]
   (def new-line @{:spans spans})
   (array/push scrollback new-line)
+  (set scrollback-dirty true)
+  (when (> cached-vrows-width 0)
+    (def ew (effective-width new-line cached-vrows-width))
+    (def nvr (count-visual-rows new-line ew))
+    (set cached-total-vrows (+ cached-total-vrows nvr))
+    (when (= scroll-offset 0)
+      (set stream-new-vrows (+ stream-new-vrows nvr))))
   (when (> scroll-offset 0)
     (def w (widget/get-widget :chat))
     (def width (if (and w (w :rect)) ((w :rect) :width) 80))
     (set scroll-offset (+ scroll-offset (count-visual-rows new-line width))))
   (when (> (length scrollback) max-scrollback)
+    (when (> cached-vrows-width 0)
+      (def old-line (get scrollback 0))
+      (def ew (effective-width old-line cached-vrows-width))
+      (set cached-total-vrows (- cached-total-vrows (count-visual-rows old-line ew))))
     (array/remove scrollback 0 (- (length scrollback) max-scrollback)))
   (widget/mark-dirty :chat))
 
@@ -1364,22 +1438,22 @@
       (-- ri))
     (-- line-idx))
 
-  # visual-rows is in reverse order — flip it
-  (def ordered (reverse visual-rows))
-  (def visible-count (length ordered))
+  (def visible-count (length visual-rows))
 
   # Bottom-align: if content doesn't fill the viewport, offset downward
   (def y-offset (- render-height visible-count))
 
-  # Render each visual row
+  # Render each visual row (visual-rows is bottom-to-top, render top-to-bottom)
+  (def row-end (+ (rect :x) width))
+  (def blank-style (tui/style))
   (for i 0 visible-count
-    (def [row rs] (get ordered i))
+    (def [row rs] (get visual-rows (- visible-count 1 i)))
     (def y (+ (rect :y) y-offset i))
     # Content starts 1 column right of the gutter for styled rows
     (def content-x (if rs (+ (rect :x) 1) (rect :x)))
     (var col content-x)
     (each cell row
-      (when (>= col (+ (rect :x) width)) (break))
+      (when (>= col row-end) (break))
       (tui/buffer-set-char buf col y (cell :text) (cell :style))
       (++ col))
     (when rs
@@ -1419,7 +1493,30 @@
     (for i 0 spinner-height
       (tui/buffer-set-string buf x (+ y-base i) (get frame i) style))
     # Draw message next to the brim (middle row)
-    (tui/buffer-set-string buf (+ x spinner-gent-width 1) (+ y-base 1) msg style)))
+    (tui/buffer-set-string buf (+ x spinner-gent-width 1) (+ y-base 1) msg style))
+
+  # Streaming dirty-row optimization: when scrollback hasn't changed and
+  # the visual layout is stable, only the partial line and spinner rows
+  # need diffing. Mark all other rows clean so the Rust diff skips them.
+  (def sb-dirty scrollback-dirty)
+  (set scrollback-dirty false)
+  (when (and (buf :dirty-rows)
+             (stream-state :active)
+             (= scroll-offset 0)
+             (not sb-dirty)
+             (= y-offset prev-y-offset))
+    (def dr (buf :dirty-rows))
+    (def dr-len (length dr))
+    (for i 0 dr-len (put dr i false))
+    (when has-partial
+      (def partial-row (- (+ y-offset visible-count) (rect :y)))
+      (when (and (>= partial-row 0) (< partial-row dr-len))
+        (put dr partial-row true)))
+    (when has-spinner
+      (def spinner-start (- height spinner-height))
+      (for i spinner-start height
+        (when (< i dr-len) (put dr i true)))))
+  (set prev-y-offset y-offset))
 
 # ── Widget constructor ─────────────────────────────────────────
 

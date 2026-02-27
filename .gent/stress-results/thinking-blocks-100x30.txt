@@ -1,0 +1,80 @@
+--- Initial screen ---
+  15 skills:
+    • db-test — /Users/pepe/.agents/skills/db-test
+    • janet — /Users/pepe/.agents/skills/janet
+    • jira — /Users/pepe/.agents/skills/jira
+    • kickoff — /Users/pepe/.agents/skills/kickoff
+    • math-vault — /Users/pepe/.agents/skills/math-vault
+    • mermaid — /Users/pepe/.agents/skills/mermaid
+    • obsidian-cli — /Users/pepe/.agents/skills/obsidian-cli
+    • pdf — /Users/pepe/.agents/skills/pdf
+    • review-pr — /Users/pepe/.agents/skills/review-pr
+    • run-tests — /Users/pepe/.agents/skills/run-tests
+    • spawn-agent — /Users/pepe/.agents/skills/spawn-agent
+    • spicedb — /Users/pepe/.agents/skills/spicedb
+    • tui-wright — /Users/pepe/.agents/skills/tui-wright
+    • worktree — /Users/pepe/.agents/skills/worktree
+    • zellij — /Users/pepe/.agents/skills/zellij
+  2 AGENTS.md:
+    • /Users/pepe/projects/github.com/pepegar/gent/AGENTS.md
+    • /Users/pepe/.agents/AGENTS.md
+  2 config:
+    • /Users/pepe/.gent/init.janet
+    • .gent/init.janet
+  session: 20260226-182039-0001
+
+── session: 20260226-182039-0001 │ 0 msgs ≈ 0 tokens ───────────────────────────────────────────────
+
+=== PROFILING STATS ===
+▐ region-based dirty tracking system can skip entire rectangular areas.
+
+
+▐   user: final check
+
+▐   think: (35 chars) — ctrl+t to expand
+▐   gent: Done! All optimizations verified.
+
+
+▐   user: /profile stats
+Profiling: 19.2s, 4293 events
+
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+event:key                    7      118.2      16.9       0.0      62.1
+event:poll                 611    17590.6      28.8       5.1    4012.8
+reactor:loop               610    18921.0      31.0       7.6    4013.1
+render:chat                608      242.8       0.4       0.3       0.7
+render:editor               10        0.2       0.0       0.0       0.1
+render:frame               610     1056.7       1.7       0.2       5.1
+render:separator             7        0.4       0.1       0.0       0.1
+stream:api-call              3    11980.2    3993.4      20.4    6031.4
+stream:drain               607      148.4       0.2       0.0       2.3
+widget:tick-timers         610        0.9       0.0       0.0       0.0
+widget:update-all          610      155.2       0.3       0.0       2.3
+── session: 20260226-182039-0001 │ 6 msgs ≈ 379 tokens ─────────────────────────────────────────────
+
+=== FINAL SCREEN ===
+
+▐   think: (35 chars) — ctrl+t to expand
+▐   gent: Done! All optimizations verified.
+
+
+▐   user: /profile stats
+Profiling: 19.2s, 4293 events
+
+Name                     Count  Total(ms)   Avg(ms)   Min(ms)   Max(ms)
+event:key                    7      118.2      16.9       0.0      62.1
+event:poll                 611    17590.6      28.8       5.1    4012.8
+reactor:loop               610    18921.0      31.0       7.6    4013.1
+render:chat                608      242.8       0.4       0.3       0.7
+render:editor               10        0.2       0.0       0.0       0.1
+render:frame               610     1056.7       1.7       0.2       5.1
+render:separator             7        0.4       0.1       0.0       0.1
+stream:api-call              3    11980.2    3993.4      20.4    6031.4
+stream:drain               607      148.4       0.2       0.0       2.3
+widget:tick-timers         610        0.9       0.0       0.0       0.0
+widget:update-all          610      155.2       0.3       0.0       2.3
+
+▐   user: /profile dump
+Trace written to: .gent/profile-20260226-182039-0001.json
+Open in https://speedscope.app
+── session: 20260226-182039-0001 │ 6 msgs ≈ 379 tokens ─────────────────────────────────────────────

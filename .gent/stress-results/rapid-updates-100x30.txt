@@ -1,0 +1,80 @@
+--- Initial screen ---
+  15 skills:
+    • db-test — /Users/pepe/.agents/skills/db-test
+    • janet — /Users/pepe/.agents/skills/janet
+    • jira — /Users/pepe/.agents/skills/jira
+    • kickoff — /Users/pepe/.agents/skills/kickoff
+    • math-vault — /Users/pepe/.agents/skills/math-vault
+    • mermaid — /Users/pepe/.agents/skills/mermaid
+    • obsidian-cli — /Users/pepe/.agents/skills/obsidian-cli
+    • pdf — /Users/pepe/.agents/skills/pdf
+    • review-pr — /Users/pepe/.agents/skills/review-pr
+    • run-tests — /Users/pepe/.agents/skills/run-tests
+    • spawn-agent — /Users/pepe/.agents/skills/spawn-agent
+    • spicedb — /Users/pepe/.agents/skills/spicedb
+    • tui-wright — /Users/pepe/.agents/skills/tui-wright
+    • worktree — /Users/pepe/.agents/skills/worktree
+    • zellij — /Users/pepe/.agents/skills/zellij
+  2 AGENTS.md:
+    • /Users/pepe/projects/github.com/pepegar/gent/AGENTS.md
+    • /Users/pepe/.agents/AGENTS.md
+  2 config:
+    • /Users/pepe/.gent/init.janet
+    • .gent/init.janet
+  session: 20260226-182104-0001
+
+── session: 20260226-182104-0001 │ 0 msgs ≈ 0 tokens ───────────────────────────────────────────────
+
+=== PROFILING STATS ===
+▐defghij
+▐         Line 209: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 210: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 211: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 212: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 213: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 214: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 215: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 216: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 217: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 218: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 219: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐        Line 220: abcdefghij abcdefghij abcdefghij abcdefghij ab
+── session: 20260226-182104-0001 │ 1 msgs ≈ 7 tokens ───────────────────────────────────────────────
+
+=== FINAL SCREEN ===
+▐defghij
+▐         Line 226: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 227: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 228: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 229: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 230: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 231: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 232: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 233: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 234: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 235: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐         Line 236: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abc
+▐defghij
+▐        Line
+── session: 20260226-182104-0001 │ 1 msgs ≈ 7 tokens ───────────────────────────────────────────────
