@@ -109,6 +109,23 @@
         # Default to the embedded version (single binary)
         gent = gent-embedded;
         default = gent;
+
+        # Skill packages
+        skill = pkgs.stdenv.mkDerivation {
+          pname = "gent-configuration-skill";
+          version = "0.1.0";
+          src = ./.gent/skills/configuration;
+          dontBuild = true;
+          installPhase = ''
+            mkdir -p $out
+            cp -r . $out/
+          '';
+          meta = with pkgs.lib; {
+            description = "Gent configuration skill";
+            homepage = "https://github.com/pepegar/gent";
+            license = licenses.mit;
+          };
+        };
       };
 
       devShells.default = pkgs.mkShell {
