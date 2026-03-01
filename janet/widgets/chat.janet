@@ -256,15 +256,15 @@
       :eval-border   (tui/style :fg [:rgb 88 91 112])                # Surface2
       :eval-code     (tui/style :fg [:rgb 205 214 244] :bg [:rgb 49 50 68])  # Text on Surface0
       :tool-bg       (tui/style :fg [:rgb 108 112 134])              # Overlay0
-      :diff-red-fg   (tui/style :fg [:rgb 243 139 168] :bg [:rgb 60 30 42])  # Red on tinted surface
-      :diff-green-fg (tui/style :fg [:rgb 166 227 161] :bg [:rgb 30 58 42])  # Green on tinted surface
+      :diff-red-fg   (tui/style :fg [:rgb 255 160 180] :bg [:rgb 40 20 25])  # Red on darker tinted surface
+      :diff-green-fg (tui/style :fg [:rgb 180 255 180] :bg [:rgb 15 40 25])  # Green on darker tinted surface
       :user-row-bg     (tui/style :bg [:rgb 30 34 66])              # Blue-tinted Surface0
       :thinking-label  (tui/style :fg [:rgb 148 148 184] :italic true) # Lavender dimmed
       :agent-row-bg    (tui/style :bg [:rgb 56 40 48])              # Peach-tinted Surface0
       :thinking-row-bg (tui/style :bg [:rgb 40 38 58])              # Lavender-tinted Surface0
       :tool-row-bg     (tui/style :bg [:rgb 34 52 52])              # Green-tinted Surface0
-      :tool-success-bg (tui/style :bg [:rgb 30 56 44])              # Deeper green
-      :tool-error-bg   (tui/style :bg [:rgb 62 30 44])              # Deeper red
+      :tool-success-bg (tui/style :bg [:rgb 15 40 25])              # Darker green
+      :tool-error-bg   (tui/style :bg [:rgb 40 20 25])              # Darker red
       :bash-exit-fail  (tui/style :fg [:rgb 243 139 168] :bold true) # Red (same as error-label)
       :bash-prompt     (tui/style :fg [:rgb 166 227 161])            # Green (dimmer than label)
       # Markdown heading/inline styles
