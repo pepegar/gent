@@ -53,6 +53,50 @@ fn extract_embedded_janet_code() -> PathBuf {
     temp_dir
 }
 
+fn print_help() {
+    println!("gent - an extensible coding agent built as a lisp machine");
+    println!();
+    println!("USAGE:");
+    println!("    gent [OPTIONS]");
+    println!();
+    println!("OPTIONS:");
+    println!("    -h, --help              Print help information");
+    println!("    -V, --version           Print version information");
+    println!("    -l, --load <FILE>       Load Janet file at startup");
+    println!("    -q, --no-init-file      Skip loading ~/.gent/init.janet and .gent/init.janet");
+    println!("        --headless          Run in headless mode (for programmatic use)");
+    println!("        --port <PORT>       Port for RPC server (default: 7888 in headless mode)");
+    println!();
+    println!("EXAMPLES:");
+    println!("    gent                    Start interactive coding session");
+    println!("    gent --headless         Start headless RPC server on port 7888");
+    println!("    gent --port 8080        Start with RPC server on custom port");
+    println!("    gent -l setup.janet     Load custom setup script at startup");
+    println!("    gent -q                 Start without loading config files");
+    println!();
+    println!("ENVIRONMENT:");
+    println!("    GENT_STAGE             Path to staging script (for development)");
+    println!("    GENT_PROFILE           Set to 1 to enable profiling");
+    println!();
+    println!("CONFIG FILES:");
+    println!("    ~/.gent/init.janet     User configuration (loaded unless -q)");
+    println!("    .gent/init.janet       Project configuration (loaded unless -q)");
+    println!();
+    println!("Once running, you can use slash commands like:");
+    println!("    /help                  Show all available commands");
+    println!("    /skills                List discovered skills");
+    println!("    /tools                 List registered tools");
+    println!("    /session               Show current session info");
+    println!("    /quit                  Exit gent");
+    println!();
+    println!("Skills extend gent's capabilities. Place .janet files in .gent/skills/");
+    println!("or ~/.gent/skills/ to add domain-specific functionality.");
+}
+
+fn print_version() {
+    println!("gent {}", env!("CARGO_PKG_VERSION"));
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse CLI flags before booting the Janet VM
     let args: Vec<String> = std::env::args().collect();
@@ -61,8 +105,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut headless = false;
     let mut port: Option<u16> = None;
     let mut i = 1;
+    
     while i < args.len() {
         match args[i].as_str() {
+            "-h" | "--help" => {
+                print_help();
+                return Ok(());
+            }
+            "-V" | "--version" => {
+                print_version();
+                return Ok(());
+            }
             "-l" | "--load" => {
                 if i + 1 < args.len() {
                     load_files.push(args[i + 1].clone());
@@ -85,6 +138,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("error: --port requires a number argument");
                     std::process::exit(1);
                 }
+            }
+            arg if arg.starts_with('-') => {
+                eprintln!("error: unknown option '{}'", arg);
+                eprintln!("Try 'gent --help' for more information.");
+                std::process::exit(1);
             }
             _ => { i += 1; }
         }

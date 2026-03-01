@@ -217,6 +217,33 @@ Each message is a Janet s-expression, one per line — crash-safe, human-readabl
 - `/unfork` — Return to the parent session
 - `/rollback <n>` — Remove the last n messages
 
+## Usage
+
+```sh
+# Start interactive session
+gent
+
+# Show help
+gent --help
+
+# Show version
+gent --version
+
+# Load a custom setup script
+gent -l setup.janet
+
+# Start without loading config files
+gent -q
+
+# Run in headless mode (for programmatic use)
+gent --headless
+
+# Custom port for RPC server
+gent --port 8080
+```
+
+Once running, use slash commands like `/help`, `/skills`, `/tools`, `/session`, `/quit`.
+
 ## Building
 
 Requires Rust and Cargo:
