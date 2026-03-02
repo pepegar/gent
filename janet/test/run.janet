@@ -46,7 +46,10 @@
    "test/test-rpc"
    "test/test-headless"
    "test/test-truncate"
-   "test/test-markdown"])
+   "test/test-markdown"
+   "test/test-focus-grid"
+   "test/test-filepicker"
+   "test/test-model"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native

@@ -194,40 +194,44 @@
 
   (case direction
     :up
-    # Wrap to bottom: find widget with highest bottom edge
+    # Wrap to bottom: find widget with highest bottom edge (same column)
     (each [name widget] focusable-widgets
       (def rect (widget :rect))
-      (def bottom (+ (rect :y) (rect :height)))
-      (when (or (nil? best-metric) (> bottom best-metric))
-        (set best-target name)
-        (set best-metric bottom)))
+      (when (rect-overlaps-horizontally? current-rect rect)
+        (def bottom (+ (rect :y) (rect :height)))
+        (when (or (nil? best-metric) (> bottom best-metric))
+          (set best-target name)
+          (set best-metric bottom))))
 
     :down
-    # Wrap to top: find widget with lowest top edge
+    # Wrap to top: find widget with lowest top edge (same column)
     (each [name widget] focusable-widgets
       (def rect (widget :rect))
-      (def top (rect :y))
-      (when (or (nil? best-metric) (< top best-metric))
-        (set best-target name)
-        (set best-metric top)))
+      (when (rect-overlaps-horizontally? current-rect rect)
+        (def top (rect :y))
+        (when (or (nil? best-metric) (< top best-metric))
+          (set best-target name)
+          (set best-metric top))))
 
     :left
-    # Wrap to right: find widget with highest right edge
+    # Wrap to right: find widget with highest right edge (same row)
     (each [name widget] focusable-widgets
       (def rect (widget :rect))
-      (def right (+ (rect :x) (rect :width)))
-      (when (or (nil? best-metric) (> right best-metric))
-        (set best-target name)
-        (set best-metric right)))
+      (when (rect-overlaps-vertically? current-rect rect)
+        (def right (+ (rect :x) (rect :width)))
+        (when (or (nil? best-metric) (> right best-metric))
+          (set best-target name)
+          (set best-metric right))))
 
     :right
-    # Wrap to left: find widget with lowest left edge
+    # Wrap to left: find widget with lowest left edge (same row)
     (each [name widget] focusable-widgets
       (def rect (widget :rect))
-      (def left (rect :x))
-      (when (or (nil? best-metric) (< left best-metric))
-        (set best-target name)
-        (set best-metric left))))
+      (when (rect-overlaps-vertically? current-rect rect)
+        (def left (rect :x))
+        (when (or (nil? best-metric) (< left best-metric))
+          (set best-target name)
+          (set best-metric left)))))
 
   best-target)
 
