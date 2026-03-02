@@ -64,6 +64,15 @@
         "****")))
   result)
 
+(defn models-url
+  "Derive the models list endpoint from the current API URL.
+   Replaces the final path segment with 'models'."
+  []
+  (def url (config :url))
+  (def parts (string/split "/" url))
+  (put parts (- (length parts) 1) "models")
+  (string/join parts "/"))
+
 (defn- using-custom-url? []
   "Check if the API URL is overridden (not the default Anthropic endpoint)."
   (not= (config :url) (defaults :url)))
@@ -119,6 +128,38 @@
     # Default Anthropic API with API key
     (put headers "x-api-key" api-key))
   headers)
+
+(defn list-models
+  "Fetch available models from the provider. Returns an array of model tables
+   (each with at least :id) or nil on error. Handles Anthropic pagination."
+  []
+  (def headers (build-headers))
+  (def base-url (models-url))
+  (def all-models @[])
+  (var after-id nil)
+  (var keep-going true)
+  (while keep-going
+    (def url
+      (if after-id
+        (string base-url "?after_id=" after-id "&limit=100")
+        (string base-url "?limit=100")))
+    (def response (http/request "GET" url headers nil))
+    (when (nil? response)
+      (set keep-going false)
+      (break))
+    (def parsed (json/decode response))
+    (when (nil? parsed)
+      (set keep-going false)
+      (break))
+    (def data (get parsed :data))
+    (when (or (nil? data) (not (indexed? data)))
+      (set keep-going false)
+      (break))
+    (array/concat all-models data)
+    (if (get parsed :has_more)
+      (set after-id (get parsed :last_id))
+      (set keep-going false)))
+  (if (empty? all-models) nil all-models))
 
 (def- claude-code-identity "You are Claude Code, Anthropic's official CLI for Claude.")
 

@@ -23,6 +23,7 @@
 # A response is an array of values: string lines, :done, or error tables.
 
 (var- response-queue @[])
+(var- request-response-queue @[])
 (var- active-streams @{})
 (var- next-stream-id 1)
 (var- last-request @{})
@@ -36,6 +37,11 @@
     (array/push q :done))
   (array/push response-queue q))
 
+(defn queue-request-response
+  "Queue a response string for the next http/request call."
+  [response]
+  (array/push request-response-queue response))
+
 (defn get-last-request
   "Return the last HTTP request made (method, url, headers, body)."
   []
@@ -45,6 +51,7 @@
   "Clear all queued responses and active streams."
   []
   (array/clear response-queue)
+  (array/clear request-response-queue)
   (set active-streams @{})
   (set next-stream-id 1)
   (set last-request @{}))
@@ -91,7 +98,12 @@
 
 (defn- mock-request [method url headers body]
   (set last-request @{:method method :url url :headers headers :body body})
-  nil)
+  (if (not (empty? request-response-queue))
+    (do
+      (def resp (first request-response-queue))
+      (array/remove request-response-queue 0)
+      resp)
+    nil))
 
 # ── JSON mocks ─────────────────────────────────────────────────
 
