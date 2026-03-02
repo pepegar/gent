@@ -54,6 +54,8 @@
           lockFile = ./Cargo.lock;
         };
         inherit nativeBuildInputs buildInputs;
+        # Pass git revision to build.rs
+        GIT_HASH = self.shortRev or "dirty";
         meta = with pkgs.lib; {
           description = "An extensible coding agent built as a lisp machine";
           homepage = "https://github.com/pepegar/gent";

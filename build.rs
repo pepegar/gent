@@ -5,18 +5,23 @@ use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Capture git commit hash at build time
-    let git_hash = Command::new("git")
-        .args(&["rev-parse", "--short", "HEAD"])
-        .output()
+    // Check for GIT_HASH env var first (set by Nix), then try git command
+    let git_hash = env::var("GIT_HASH")
         .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok()
-            } else {
-                None
-            }
+        .or_else(|| {
+            Command::new("git")
+                .args(&["rev-parse", "--short", "HEAD"])
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout).ok()
+                    } else {
+                        None
+                    }
+                })
+                .map(|s| s.trim().to_string())
         })
-        .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
