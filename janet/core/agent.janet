@@ -339,9 +339,12 @@
     # Status provider for separator
     (sep/set-status-provider
       (fn []
+        (def focused-w (widget/focused))
+        (def focus-name (if focused-w (string (get focused-w :name)) "none"))
         (string "session: " (conv/get-session-id)
                 " │ " (conv/length) " msgs"
-                " ≈ " (conv/estimate-tokens) " tokens")))
+                " ≈ " (conv/estimate-tokens) " tokens"
+                " │ focus: " focus-name)))
 
     # Hook: mark separator dirty on conversation changes
     (hooks/add :after-message (fn [_] (widget/mark-dirty :separator)))
@@ -486,21 +489,42 @@
                                                        # Batch key events for paste performance: drain all pending
                                                        # key events before rendering, like we do for scroll events.
                                                        (profile/with-span "event:key" "event" (fn []
-                                                                                               (editor/batch-begin)
-                                                                                               (var result (widget/dispatch :editor ev))
-                                                                                               (var leftover nil)
-                                                                                               (when (nil? result)
-                                                                                                 (var next-ev (term/read-event 0))
-                                                                                                 (while (and next-ev (= :key (get next-ev :type)))
-                                                                                                   (set result (widget/dispatch :editor next-ev))
-                                                                                                   (when result (break))
-                                                                                                   (set next-ev (term/read-event 0)))
-                                                                                                 (when (and next-ev (nil? result))
-                                                                                                   (set leftover next-ev)))
-                                                                                               (editor/batch-end)
+                                                                                               # Intercept Alt+Arrow for focus navigation
+                                                                                               (def key (get ev :key))
+                                                                                               (def alt (get ev :alt))
+                                                                                               (var focus-handled false)
+                                                                                               (when alt
+                                                                                                 (def direction
+                                                                                                   (case key
+                                                                                                     :up :up
+                                                                                                     :down :down
+                                                                                                     :left :left
+                                                                                                     :right :right
+                                                                                                     nil))
+                                                                                                 (when direction
+                                                                                                   (widget/focus-direction direction)
+                                                                                                   (widget/mark-dirty :separator)
+                                                                                                   (set focus-handled true)))
 
-                                                         # Handle any leftover non-key event from the drain
-                                                                                               (when leftover
+                                                                                               (when (not focus-handled)
+                                                                                                 (editor/batch-begin)
+                                                                                                 # Dispatch to currently focused widget (not hardcoded :editor)
+                                                                                                 (def focused-widget (widget/focused))
+                                                                                                 (def focused-name (when focused-widget (focused-widget :name)))
+                                                                                                 (var result (when focused-name (widget/dispatch focused-name ev)))
+                                                                                                 (var leftover nil)
+                                                                                                 (when (nil? result)
+                                                                                                   (var next-ev (term/read-event 0))
+                                                                                                   (while (and next-ev (= :key (get next-ev :type)))
+                                                                                                     (set result (when focused-name (widget/dispatch focused-name next-ev)))
+                                                                                                     (when result (break))
+                                                                                                     (set next-ev (term/read-event 0)))
+                                                                                                   (when (and next-ev (nil? result))
+                                                                                                     (set leftover next-ev)))
+                                                                                                 (editor/batch-end)
+
+                                                                                                 # Handle any leftover non-key event from the drain
+                                                                                                 (when leftover
                                                                                                  (def lt (get leftover :type))
                                                                                                  (cond
                                                                                                    (= :resize lt)
@@ -511,7 +535,7 @@
                                                                                                      (widget/dispatch :chat
                                                                                                        {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
 
-                                                                                               (cond
+                                                                                                 (cond
                                                                                                  (= result :quit)
                                                                                                  (do (chat/cleanup) (set should-quit true) (break))
 
@@ -560,7 +584,7 @@
                                                                                                  (widget/dispatch :chat {:type :toggle-thinking})
 
                                                                                                  (= result :rerender)
-                                                                                                 (force-rerender))))))
+                                                                                                 (force-rerender)))))))
 
       # 4. Poll RPC server (accept connections, process requests)
                                                    (when rpc-server
@@ -588,12 +612,10 @@
                                                      (widget/mark-all-dirty))
 
       # 8. Render frame (diff-based)
-                                                   (profile/with-span "render:frame" "render" (fn [] (render-frame))))))
-
-      
+                                                   (profile/with-span "render:frame" "render" (fn [] (render-frame)))))
 
     # Cleanup RPC server if started
     (when rpc-server
       (rpc-srv/stop rpc-server))))
 
-      # close defer, defn
+  )  # close defer, defn

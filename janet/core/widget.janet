@@ -50,21 +50,215 @@
 # ── Focus ──────────────────────────────────────────────────────
 
 (var- focused-name nil)
+(var- focus-neighbors @{})
 
 (defn focus
   "Set which widget receives keyboard input."
   [name]
+  (def old-name focused-name)
   (when focused-name
     (when-let [w (get widgets focused-name)]
-      (put w :focused false)))
+      (put w :focused false)
+      (put w :dirty true)))
   (set focused-name name)
   (when-let [w (get widgets name)]
-    (put w :focused true)))
+    (put w :focused true)
+    (put w :dirty true)))
 
 (defn focused
   "Return the currently focused widget, or nil."
   []
   (when focused-name (get widgets focused-name)))
+
+(defn- rect-overlaps-vertically?
+  "Check if two rects share any vertical space."
+  [r1 r2]
+  (def r1-top (r1 :y))
+  (def r1-bottom (+ (r1 :y) (r1 :height)))
+  (def r2-top (r2 :y))
+  (def r2-bottom (+ (r2 :y) (r2 :height)))
+  (not (or (>= r1-top r2-bottom) (>= r2-top r1-bottom))))
+
+(defn- rect-overlaps-horizontally?
+  "Check if two rects share any horizontal space."
+  [r1 r2]
+  (def r1-left (r1 :x))
+  (def r1-right (+ (r1 :x) (r1 :width)))
+  (def r2-left (r2 :x))
+  (def r2-right (+ (r2 :x) (r2 :width)))
+  (not (or (>= r1-left r2-right) (>= r2-left r1-right))))
+
+(defn- build-neighbor-graph
+  "Build a spatial neighbor graph from widget rects.
+   Returns @{:widget-name {:up :name :down :name :left :name :right :name} ...}
+   Only includes focusable widgets."
+  []
+  (def graph @{})
+  (def focusable-widgets @[])
+
+  # Collect focusable widgets with rects
+  (eachp [name widget] widgets
+    (when (and widget (widget :rect) (not= false (get widget :focusable true)))
+      (array/push focusable-widgets [name widget])))
+
+  # For each widget, find neighbors in each direction
+  (each [name widget] focusable-widgets
+    (def rect (widget :rect))
+    (def neighbors @{:up nil :down nil :left nil :right nil})
+
+    # Find neighbor above (closest widget with bottom edge at or above our top edge)
+    (var best-up nil)
+    (var best-up-dist math/inf)
+    (each [other-name other-widget] focusable-widgets
+      (when (not= name other-name)
+        (def other-rect (other-widget :rect))
+        (def other-bottom (+ (other-rect :y) (other-rect :height)))
+        (def our-top (rect :y))
+        (when (and (<= other-bottom our-top)
+                   (rect-overlaps-horizontally? rect other-rect))
+          (def dist (- our-top other-bottom))
+          (when (< dist best-up-dist)
+            (set best-up other-name)
+            (set best-up-dist dist)))))
+    (put neighbors :up best-up)
+
+    # Find neighbor below (closest widget with top edge at or below our bottom edge)
+    (var best-down nil)
+    (var best-down-dist math/inf)
+    (each [other-name other-widget] focusable-widgets
+      (when (not= name other-name)
+        (def other-rect (other-widget :rect))
+        (def other-top (other-rect :y))
+        (def our-bottom (+ (rect :y) (rect :height)))
+        (when (and (>= other-top our-bottom)
+                   (rect-overlaps-horizontally? rect other-rect))
+          (def dist (- other-top our-bottom))
+          (when (< dist best-down-dist)
+            (set best-down other-name)
+            (set best-down-dist dist)))))
+    (put neighbors :down best-down)
+
+    # Find neighbor to left (closest widget with right edge at or before our left edge)
+    (var best-left nil)
+    (var best-left-dist math/inf)
+    (each [other-name other-widget] focusable-widgets
+      (when (not= name other-name)
+        (def other-rect (other-widget :rect))
+        (def other-right (+ (other-rect :x) (other-rect :width)))
+        (def our-left (rect :x))
+        (when (and (<= other-right our-left)
+                   (rect-overlaps-vertically? rect other-rect))
+          (def dist (- our-left other-right))
+          (when (< dist best-left-dist)
+            (set best-left other-name)
+            (set best-left-dist dist)))))
+    (put neighbors :left best-left)
+
+    # Find neighbor to right (closest widget with left edge at or after our right edge)
+    (var best-right nil)
+    (var best-right-dist math/inf)
+    (each [other-name other-widget] focusable-widgets
+      (when (not= name other-name)
+        (def other-rect (other-widget :rect))
+        (def other-left (other-rect :x))
+        (def our-right (+ (rect :x) (rect :width)))
+        (when (and (>= other-left our-right)
+                   (rect-overlaps-vertically? rect other-rect))
+          (def dist (- other-left our-right))
+          (when (< dist best-right-dist)
+            (set best-right other-name)
+            (set best-right-dist dist)))))
+    (put neighbors :right best-right)
+
+    (put graph name neighbors))
+
+  graph)
+
+(defn- find-wrap-target
+  "Find a widget to wrap to when moving in direction with no direct neighbor.
+   For toroidal wrapping: up wraps to bottom, down to top, etc."
+  [current-name direction]
+  (def current-widget (get widgets current-name))
+  (when (nil? current-widget) (break nil))
+  (def current-rect (current-widget :rect))
+  (when (nil? current-rect) (break nil))
+
+  (def focusable-widgets @[])
+  (eachp [name widget] widgets
+    (when (and widget (widget :rect) (not= false (get widget :focusable true))
+               (not= name current-name))
+      (array/push focusable-widgets [name widget])))
+
+  (var best-target nil)
+  (var best-metric nil)
+
+  (case direction
+    :up
+    # Wrap to bottom: find widget with highest bottom edge
+    (each [name widget] focusable-widgets
+      (def rect (widget :rect))
+      (def bottom (+ (rect :y) (rect :height)))
+      (when (or (nil? best-metric) (> bottom best-metric))
+        (set best-target name)
+        (set best-metric bottom)))
+
+    :down
+    # Wrap to top: find widget with lowest top edge
+    (each [name widget] focusable-widgets
+      (def rect (widget :rect))
+      (def top (rect :y))
+      (when (or (nil? best-metric) (< top best-metric))
+        (set best-target name)
+        (set best-metric top)))
+
+    :left
+    # Wrap to right: find widget with highest right edge
+    (each [name widget] focusable-widgets
+      (def rect (widget :rect))
+      (def right (+ (rect :x) (rect :width)))
+      (when (or (nil? best-metric) (> right best-metric))
+        (set best-target name)
+        (set best-metric right)))
+
+    :right
+    # Wrap to left: find widget with lowest left edge
+    (each [name widget] focusable-widgets
+      (def rect (widget :rect))
+      (def left (rect :x))
+      (when (or (nil? best-metric) (< left best-metric))
+        (set best-target name)
+        (set best-metric left))))
+
+  best-target)
+
+(defn focus-direction
+  "Move focus in a direction (:up :down :left :right) with toroidal wrapping.
+   Returns the new focused widget name, or nil if no change."
+  [direction]
+  (when (nil? focused-name) (break nil))
+
+  # Rebuild neighbor graph if empty or layout changed
+  (when (empty? focus-neighbors)
+    (set focus-neighbors (build-neighbor-graph)))
+
+  (def current-neighbors (get focus-neighbors focused-name))
+  (when (nil? current-neighbors) (break nil))
+
+  (def target (get current-neighbors direction))
+  (def final-target
+    (if target
+      target
+      # No direct neighbor, try toroidal wrap
+      (find-wrap-target focused-name direction)))
+
+  (when final-target
+    (focus final-target)
+    final-target))
+
+(defn rebuild-focus-graph
+  "Force rebuild of the focus neighbor graph. Call after layout changes."
+  []
+  (set focus-neighbors (build-neighbor-graph)))
 
 # ── Layout ─────────────────────────────────────────────────────
 
@@ -117,6 +311,8 @@
     (eachp [name rect] assignments
       (when-let [w (get widgets name)]
         (put w :rect rect)))
+    # Rebuild focus graph after layout changes
+    (rebuild-focus-graph)
     assignments))
 
 # ── Timers ─────────────────────────────────────────────────────

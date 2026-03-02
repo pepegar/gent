@@ -1535,6 +1535,43 @@
 
     :handle (fn [self event]
              (def etype (get event :type))
+             # Handle arrow keys when focused for message navigation
+             (when (and (= etype :key) (get self :focused))
+               (def key (get event :key))
+               (def width (if (self :rect) ((self :rect) :width) 80))
+               (def height (if (self :rect) ((self :rect) :height) 10))
+               (def max-offset (max 0 (- (total-visual-rows width) height)))
+               (cond
+                 (= key :up)
+                 # Navigate up (scroll up by 1 line, wrapping at top)
+                 (do
+                   (def new-offset (+ scroll-offset 1))
+                   (set scroll-offset (if (> new-offset max-offset) 0 new-offset))
+                   (widget/mark-dirty :chat)
+                   (break nil))
+
+                 (= key :down)
+                 # Navigate down (scroll down by 1 line, wrapping at bottom)
+                 (do
+                   (def new-offset (- scroll-offset 1))
+                   (set scroll-offset (if (< new-offset 0) max-offset new-offset))
+                   (widget/mark-dirty :chat)
+                   (break nil))
+
+                 (= key :pageup)
+                 (do
+                   (def page-size (max 1 (- height 2)))
+                   (set scroll-offset (min max-offset (+ scroll-offset page-size)))
+                   (widget/mark-dirty :chat)
+                   (break nil))
+
+                 (= key :pagedown)
+                 (do
+                   (def page-size (max 1 (- height 2)))
+                   (set scroll-offset (max 0 (- scroll-offset page-size)))
+                   (widget/mark-dirty :chat)
+                   (break nil))))
+
              (cond
                (= etype :submit) (submit (event :text))
                (= etype :stop) (stop)

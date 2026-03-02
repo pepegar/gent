@@ -151,6 +151,7 @@
   "Create an editor widget backed by editor_new."
   []
   (set editor-state (ed/new 80 5))
+
   @{:name :editor
     :state @{}
     :rect nil
@@ -160,6 +161,10 @@
     :timers @[]
 
     :handle (fn [self event]
+             # Ignore all input when not focused
+             (when (not (get self :focused))
+               (break nil))
+
              (when (= :resize (get event :type))
                (break nil))
              (when (not= :key (get event :type))
@@ -509,10 +514,11 @@
              (def spans (or (r :spans) @[]))
              (set cached-cursor-row (+ (rect :y) (vis-cursor :row) 1))
              (set cached-cursor-col (+ (rect :x) prompt-len (vis-cursor :col) 1))
+             (def is-focused (get self :focused))
              (def prompt-style
                (if prompt-mode
-                 (tui/style :fg (tui/color-indexed 214) :bold true)
-                 (tui/style :fg (tui/color-indexed 39) :bold true)))
+                 (tui/style :fg (tui/color-indexed (if is-focused 214 240)) :bold true)
+                 (tui/style :fg (tui/color-indexed (if is-focused 39 240)) :bold true)))
              (def pad (string/repeat " " prompt-len))
 
              (for i 0 (rect :height)

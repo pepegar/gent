@@ -24,6 +24,7 @@
     :rect nil
     :dirty true
     :focused false
+    :focusable false
     :tasks @[]
     :timers @[]
 
