@@ -1,11 +1,29 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Capture git commit hash at build time
+    let git_hash = Command::new("git")
+        .args(&["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    println!("cargo:rustc-env=GIT_HASH={}", git_hash);
+
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("embedded_janet.rs");
-    
+
     // Only embed if the embedded feature is enabled
     if env::var("CARGO_FEATURE_EMBEDDED").is_ok() {
         // Generate just the file-writing statements wrapped in a block.

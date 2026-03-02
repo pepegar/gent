@@ -97,7 +97,9 @@ fn print_help() {
 }
 
 fn print_version() {
-    println!("gent {}", env!("CARGO_PKG_VERSION"));
+    let version = env!("CARGO_PKG_VERSION");
+    let git_hash = env!("GIT_HASH");
+    println!("gent {} ({})", version, git_hash);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
