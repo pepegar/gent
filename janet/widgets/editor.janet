@@ -22,6 +22,15 @@
 (var- cached-cursor-row nil)
 (var- cached-cursor-col nil)
 
+# ── Status provider (for border title) ────────────────────────
+
+(var- status-fn nil)
+
+(defn set-status-provider
+  "Set a function that returns status text for the editor border title."
+  [f]
+  (set status-fn f))
+
 # ── Prompt mode state ────────────────────────────────────────
 # When active, the editor shows a custom prompt, optionally masks input,
 # and calls a callback on Enter instead of returning the text to the reactor.
@@ -61,10 +70,10 @@
 # ── Public API for the reactor ───────────────────────────────
 
 (defn get-height
-  "How many rows the editor needs."
+  "How many rows the editor needs (including border)."
   []
-  (if (nil? editor-state) 5
-    (or (editor-state :height) 5)))
+  (+ 2 (if (nil? editor-state) 5
+           (or (editor-state :height) 5))))
 
 (defn get-editor-state [] editor-state)
 
@@ -522,37 +531,51 @@
                  nil)))
 
     :render (fn [self rect buf]
-             (when (nil? rect) (break))
+             (when (or (nil? rect) (<= (rect :width) 0) (<= (rect :height) 0)) (break))
              (put editor-state :widget-rect rect)
+
+      # Build border title from status provider
+             (def is-focused (get self :focused))
+             (def border-color
+               (if is-focused
+                 (tui/color-indexed 75)
+                 (tui/color-indexed 240)))
+             (def title-text (when status-fn (try (status-fn) ([_] nil))))
+             (def blk (tui/block :title (or title-text "")
+                                  :borders :all :border-type :rounded
+                                  :border-style (tui/style :fg border-color)
+                                  :padding (tui/padding 1 1 0 0)))
+             (tui/render blk rect buf)
+             (def inner (tui/block-inner blk rect))
+             (when (or (<= (inner :height) 0) (<= (inner :width) 0)) (break))
 
       # Determine prompt label based on mode
              (def current-prompt (if prompt-mode (prompt-mode :label) prompt-text))
              (def is-masked (and prompt-mode (prompt-mode :mask)))
 
-      # Resize editor to match widget rect
+      # Resize editor to match inner rect (inside border)
              (def has-prompt (> (length current-prompt) 0))
              (def prompt-len (if has-prompt (+ (length current-prompt) 2) 1))
-             (def edit-width (max 1 (- (rect :width) prompt-len)))
-             (ed/resize editor-state edit-width (rect :height))
+             (def edit-width (max 1 (- (inner :width) prompt-len)))
+             (ed/resize editor-state edit-width (inner :height))
 
              (def r (ed/render editor-state))
              (def lines (r :lines))
              (def vis-cursor (r :cursor))
              (def spans (or (r :spans) @[]))
-             (set cached-cursor-row (+ (rect :y) (vis-cursor :row) 1))
-             (set cached-cursor-col (+ (rect :x) prompt-len (vis-cursor :col) 1))
-             (def is-focused (get self :focused))
+             (set cached-cursor-row (+ (inner :y) (vis-cursor :row) 1))
+             (set cached-cursor-col (+ (inner :x) prompt-len (vis-cursor :col) 1))
              (def prompt-style
                (if prompt-mode
                  (tui/style :fg (tui/color-indexed (if is-focused 214 240)) :bold true)
                  (tui/style :fg (tui/color-indexed (if is-focused 39 240)) :bold true)))
              (def pad (string/repeat " " prompt-len))
 
-             (for i 0 (rect :height)
-               (def y (+ (rect :y) i))
+             (for i 0 (inner :height)
+               (def y (+ (inner :y) i))
                (if (= i 0)
                  (do
-                   (tui/buffer-set-string buf (rect :x) y
+                   (tui/buffer-set-string buf (inner :x) y
                      (if has-prompt
                        (string " " current-prompt " ")
                        " ")
@@ -563,23 +586,23 @@
                        (if is-masked
                          (string/repeat "•" (length line-text))
                          line-text))
-                     (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))
+                     (tui/buffer-set-string buf (+ (inner :x) prompt-len) y display-text)))
                  (do
-                   (tui/buffer-set-string buf (rect :x) y pad)
+                   (tui/buffer-set-string buf (inner :x) y pad)
                    (when (< i (length lines))
                      (def line-text (get lines i ""))
                      (def display-text
                        (if is-masked
                          (string/repeat "•" (length line-text))
                          line-text))
-                     (tui/buffer-set-string buf (+ (rect :x) prompt-len) y display-text)))))
+                     (tui/buffer-set-string buf (+ (inner :x) prompt-len) y display-text)))))
 
       # Apply styled spans (skip in masked mode)
              (unless is-masked
                (each span spans
-                 (def y (+ (rect :y) (span :row)))
+                 (def y (+ (inner :y) (span :row)))
                  (for col (span :col-start) (span :col-end)
-                   (def x (+ (rect :x) prompt-len col))
+                   (def x (+ (inner :x) prompt-len col))
                    (def cell (tui/buffer-get buf x y))
                    (tui/buffer-set-char buf x y (cell :ch)
                      (tui/style-merge (cell :style) (span :style)))))))})

@@ -1321,7 +1321,7 @@
         (conv/push {:role "assistant" :content (get response :content)}))
       (array/clear followup-queue)
       (enter-idle)
-      (widget/mark-dirty :separator))
+      (widget/mark-dirty :editor))
     (= mode :tools)
     (do
       (abort/abort!)
@@ -1333,7 +1333,7 @@
       (array/clear steering-queue)
       (array/clear followup-queue)
       (enter-idle)
-      (widget/mark-dirty :separator))))
+      (widget/mark-dirty :editor))))
 
 (defn cleanup []
   (when (= mode :streaming)

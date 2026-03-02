@@ -1,7 +1,7 @@
 # The reactor — gent's event loop.
 #
 # A thin dispatcher that polls events and routes them to widgets.
-# All agent logic lives in widgets (chat, editor, separator).
+# All agent logic lives in widgets (chat, editor, filepicker).
 # This is the equivalent of Emacs's command loop.
 #
 # Rendering pipeline:
@@ -24,7 +24,6 @@
 (import tui)
 (import widgets/chat :as chat)
 (import widgets/editor :as editor-w)
-(import widgets/separator :as sep)
 (import core/completion :as completion)
 (import core/dialog :as dialog)
 (import core/profile :as profile)
@@ -35,7 +34,6 @@
 (def- default-layout-data
   @[{:constraint :fill
      :children [{:widget :chat :constraint :fill}]}
-    {:widget :separator :constraint 1}
     {:widget :editor :constraint |(editor/get-height)}])
 
 (defn- sync-ui-layout
@@ -46,10 +44,6 @@
     (when (chat-w :rect)
       (def r (chat-w :rect))
       (put layout :output-bottom (+ (r :y) (r :height)))))
-  (when-let [sep-w (widget/get-widget :separator)]
-    (when (sep-w :rect)
-      (def r (sep-w :rect))
-      (put layout :separator-row (+ (r :y) 1))))
   (when-let [ed-w (widget/get-widget :editor)]
     (when (ed-w :rect)
       (def r (ed-w :rect))
@@ -160,7 +154,7 @@
   # overlapped so their clean cells overwrite the stale popup in prev-buf.
   (when popup-was-visible
     (widget/mark-dirty :chat)
-    (widget/mark-dirty :separator)
+    (widget/mark-dirty :editor)
     (set popup-was-visible false)
     (set pending-scroll-opt nil))
 
@@ -279,7 +273,7 @@
     ([err]
      (chat/output-eval code nil)
      (chat/output-error (string err))))
-  (widget/mark-dirty :separator)
+  (widget/mark-dirty :editor)
   (widget/mark-dirty :editor))
 
 # ── Startup banner ─────────────────────────────────────────────
@@ -325,7 +319,6 @@
 
     # Create and register widgets
     (widget/register (chat/create))
-    (widget/register (sep/create))
     (widget/register (editor-w/create))
 
     # Set layout (only if user config hasn't already set one via -l etc.)
@@ -336,18 +329,18 @@
     # Focus the editor
     (widget/focus :editor)
 
-    # Status provider for separator
-    (sep/set-status-provider
+    # Status provider for editor border title
+    (editor/set-status-provider
       (fn []
         (def focused-w (widget/focused))
         (def focus-name (if focused-w (string (get focused-w :name)) "none"))
-        (string "session: " (conv/get-session-id)
+        (string "focus: " focus-name
                 " │ " (conv/length) " msgs"
                 " ≈ " (conv/estimate-tokens) " tokens"
-                " │ focus: " focus-name)))
+                " │ " (conv/get-session-id))))
 
-    # Hook: mark separator dirty on conversation changes
-    (hooks/add :after-message (fn [_] (widget/mark-dirty :separator)))
+    # Hook: mark editor dirty on conversation changes (updates title)
+    (hooks/add :after-message (fn [_] (widget/mark-dirty :editor)))
 
     (hooks/add :before-send
       (fn [conversation]
@@ -456,7 +449,7 @@
                                                                          (when (and r (not= "" r))
                                                                            (each line (string/split "\n" r)
                                                                              (chat/output-info line)))
-                                                                         (widget/mark-dirty :separator)))
+                                                                         (widget/mark-dirty :editor)))
                                                                      (chat/submit key-result)))
 
                                                                  (and (tuple? key-result) (= :eval (first key-result)))
@@ -503,7 +496,7 @@
                                                                                                      nil))
                                                                                                  (when direction
                                                                                                    (widget/focus-direction direction)
-                                                                                                   (widget/mark-dirty :separator)
+                                                                                                   (widget/mark-dirty :editor)
                                                                                                    (set focus-handled true)))
 
                                                                                                (when (not focus-handled)
@@ -554,7 +547,7 @@
                                                                                                          (when (and r (not= "" r))
                                                                                                            (each line (string/split "\n" r)
                                                                                                              (chat/output-info line)))
-                                                                                                         (widget/mark-dirty :separator)))
+                                                                                                         (widget/mark-dirty :editor)))
                                                                                                      (chat/submit result)))
 
                                                                                                  (and (tuple? result) (= :eval (first result)))
