@@ -392,52 +392,79 @@
                  (put self :dirty true)
                  :rerender)
 
-               # Page up/down, arrow up/down at boundary → scroll signals
+               # Page up/down → scroll signals
                (= key :page-up)
                :scroll-up
 
                (= key :page-down)
                :scroll-down
 
+               # Up arrow: history navigation at first line, cursor movement otherwise
                (and (= key :up) (not alt) (not ctrl))
-               (let [vis (ed/point->visual editor-state)]
-                 (if (> (vis :row) 0)
-                   (do (ed/move-up editor-state)
-                       (put self :dirty true)
-                       nil)
-                   # At top row — scroll chat instead of input history
-                   :scroll-line-up))
+               (let [content (ed/text editor-state)
+                     is-empty (= (length content) 0)]
+                 (if is-empty
+                   # Empty editor → enter history
+                   (let [entry (ih/prev "")]
+                     (if entry
+                       (do (ed/set-text editor-state entry)
+                           (put self :dirty true)
+                           nil)
+                       nil))
+                   # Non-empty editor → check visual position
+                   (let [vis (ed/point->visual editor-state)
+                         at-first-row (= (vis :row) 0)]
+                     (if at-first-row
+                       (if (ih/browsing?)
+                         # Already browsing history at first line → go to previous entry
+                         (let [entry (ih/prev content)]
+                           (if entry
+                             (do (ed/set-text editor-state entry)
+                                 (put self :dirty true)
+                                 nil)
+                             nil))
+                         # At first line but not browsing → move to line start
+                         (do (ed/move-line-start editor-state)
+                             (put self :dirty true)
+                             nil))
+                       # Middle of text → normal cursor movement
+                       (do (ed/move-up editor-state)
+                           (put self :dirty true)
+                           nil)))))
 
+               # Down arrow: history navigation at last line, cursor movement otherwise
                (and (= key :down) (not alt) (not ctrl))
-               (let [vis (ed/point->visual editor-state)
-                     content (ed/text editor-state)
-                     vlines (ed/compute-visual-lines content (editor-state :width))]
-                 (if (< (vis :row) (- (length vlines) 1))
-                   (do (ed/move-down editor-state)
-                       (put self :dirty true)
-                       nil)
-                   # At bottom row — scroll chat instead of input history
-                   :scroll-line-down))
-
-               # Ctrl+Up: Previous input history
-               (and ctrl (= key :up))
-               (let [entry (ih/prev (ed/text editor-state))]
-                 (if entry
-                   (do (ed/set-text editor-state entry)
-                       (put self :dirty true)
-                       nil)
-                   nil))
-
-               # Ctrl+Down: Next input history (when browsing)
-               (and ctrl (= key :down))
-               (if (ih/browsing?)
-                 (let [entry (ih/next)]
-                   (if entry
-                     (do (ed/set-text editor-state entry)
-                         (put self :dirty true)
-                         nil)
-                     nil))
-                 nil)
+               (let [content (ed/text editor-state)
+                     is-empty (= (length content) 0)]
+                 (if is-empty
+                   # Empty editor → navigate history forward
+                   (when (ih/browsing?)
+                     (let [entry (ih/next)]
+                       (when entry
+                         (ed/set-text editor-state entry)
+                         (put self :dirty true)))
+                     nil)
+                   # Non-empty editor → check visual position
+                   (let [vis (ed/point->visual editor-state)
+                         vlines (ed/compute-visual-lines content (editor-state :width))
+                         at-last-row (= (vis :row) (- (length vlines) 1))]
+                     (if at-last-row
+                       (if (ih/browsing?)
+                         # Already browsing history at last line → go to next entry
+                         (let [entry (ih/next)]
+                           (if entry
+                             (do (ed/set-text editor-state entry)
+                                 (put self :dirty true)
+                                 nil)
+                             (do (put self :dirty true) nil)))
+                         # At last line but not browsing → move to line end
+                         (do (ed/move-line-end editor-state)
+                             (put self :dirty true)
+                             nil))
+                       # Middle of text → normal cursor movement
+                       (do (ed/move-down editor-state)
+                           (put self :dirty true)
+                           nil)))))
 
                # Ctrl+G: open external editor
                (and ctrl (= key "g"))

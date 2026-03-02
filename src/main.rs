@@ -66,6 +66,7 @@ fn print_help() {
     println!("    -q, --no-init-file      Skip loading ~/.gent/init.janet and .gent/init.janet");
     println!("        --headless          Run in headless mode (for programmatic use)");
     println!("        --port <PORT>       Port for RPC server (default: 7888 in headless mode)");
+    println!("        --sessions-dir <PATH>  Override session history directory (default: ~/.gent/sessions)");
     println!();
     println!("EXAMPLES:");
     println!("    gent                    Start interactive coding session");
@@ -73,10 +74,12 @@ fn print_help() {
     println!("    gent --port 8080        Start with RPC server on custom port");
     println!("    gent -l setup.janet     Load custom setup script at startup");
     println!("    gent -q                 Start without loading config files");
+    println!("    gent --sessions-dir /tmp/gent-test  Use custom sessions directory");
     println!();
     println!("ENVIRONMENT:");
     println!("    GENT_STAGE             Path to staging script (for development)");
     println!("    GENT_PROFILE           Set to 1 to enable profiling");
+    println!("    GENT_SESSIONS_DIR      Override session history directory");
     println!();
     println!("CONFIG FILES:");
     println!("    ~/.gent/init.janet     User configuration (loaded unless -q)");
@@ -104,8 +107,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut no_init = false;
     let mut headless = false;
     let mut port: Option<u16> = None;
+    let mut sessions_dir: Option<String> = None;
     let mut i = 1;
-    
+
     while i < args.len() {
         match args[i].as_str() {
             "-h" | "--help" => {
@@ -136,6 +140,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     i += 2;
                 } else {
                     eprintln!("error: --port requires a number argument");
+                    std::process::exit(1);
+                }
+            }
+            "--sessions-dir" => {
+                if i + 1 < args.len() {
+                    sessions_dir = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("error: --sessions-dir requires a path argument");
                     std::process::exit(1);
                 }
             }
@@ -175,6 +188,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(p) = port {
         client.run(format!(r#"(setdyn :gent/port {})"#, p))?;
+    }
+    // Check for sessions directory override (CLI flag takes precedence over env var)
+    let sessions_dir_override = sessions_dir.or_else(|| std::env::var("GENT_SESSIONS_DIR").ok());
+    if let Some(dir) = sessions_dir_override {
+        let escaped_dir = dir.replace('\\', "\\\\").replace('"', "\\\"");
+        client.run(format!(r#"(setdyn :gent/sessions-dir "{}")"#, escaped_dir))?;
     }
 
     // Load and run boot.janet — from here, Janet takes over

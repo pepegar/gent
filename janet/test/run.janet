@@ -2,6 +2,9 @@
 #
 # Usage (from project root): janet janet/test/run.janet
 
+# Set sessions directory to a temp location to avoid polluting ~/.gent/sessions
+(os/setenv "GENT_SESSIONS_DIR" "/tmp/gent-test-sessions")
+
 # Find the janet/ directory
 (def janet-dir
   (if (os/stat "janet/core") "janet"

@@ -47,10 +47,15 @@
   (string buf))
 
 (defn- sessions-base-dir
-  "Return the base sessions directory: ~/.gent/sessions"
+  "Return the base sessions directory.
+   Checks in order: :gent/sessions-dir dyn var, GENT_SESSIONS_DIR env var, ~/.gent/sessions"
   []
-  (def home (os/getenv "HOME"))
-  (string home "/.gent/sessions"))
+  # Check for override from CLI flag or environment variable
+  (if-let [override (or (dyn :gent/sessions-dir) (os/getenv "GENT_SESSIONS_DIR"))]
+    override
+    (do
+      (def home (os/getenv "HOME"))
+      (string home "/.gent/sessions"))))
 
 (defn project-sessions-dir
   "Return the sessions directory for the current working directory."
