@@ -35,21 +35,24 @@ fn find_janet_dir() -> PathBuf {
 #[cfg(feature = "embedded")]
 fn extract_embedded_janet_code() -> PathBuf {
     use std::fs;
-    
-    let temp_dir = std::env::temp_dir().join("gent-janet");
-    
+
+    // Include git hash in cache directory name to invalidate on rebuild
+    let git_hash = env!("GIT_HASH");
+    let cache_dir_name = format!("gent-janet-{}", git_hash);
+    let temp_dir = std::env::temp_dir().join(cache_dir_name);
+
     // Check if already extracted (use boot.janet as marker)
     if temp_dir.join("boot.janet").exists() {
         return temp_dir;
     }
-    
+
     // Remove stale/incomplete extraction
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("failed to create temp janet dir");
-    
+
     // Write all embedded Janet files
     include!(concat!(env!("OUT_DIR"), "/embedded_janet.rs"));
-    
+
     temp_dir
 }
 
