@@ -150,17 +150,16 @@
   []
   (when (nil? screen-area) (break))
 
-  # When a popup disappears, force-repaint the widgets it overlapped
-  # so their clean cells overwrite the stale popup in prev-buf.
-  # While popup is still active, skip the force-repaint to avoid flicker.
+  # When a popup was visible last frame, force-repaint the widgets it
+  # overlapped so clean cells overwrite stale popup remnants in prev-buf.
+  # This handles both popup disappearance AND popup resize/reposition —
+  # without it, old border cells linger when the popup changes shape.
   (when popup-was-visible
-    (if (or (dialog/active?) (completion/active?))
-      (set pending-scroll-opt nil)
-      (do
-        (widget/mark-dirty :chat)
-        (widget/mark-dirty :editor)
-        (set popup-was-visible false)
-        (set pending-scroll-opt nil))))
+    (widget/mark-dirty :chat)
+    (widget/mark-dirty :editor)
+    (set pending-scroll-opt nil)
+    (unless (or (dialog/active?) (completion/active?))
+      (set popup-was-visible false)))
 
   # Accumulate all frame output into a single buffer for atomic write.
   # This prevents flicker when popup overlays cover widget areas — without
@@ -540,66 +539,66 @@
 
                                                                                                  # Handle any leftover non-key event from the drain
                                                                                                  (when leftover
-                                                                                                 (def lt (get leftover :type))
-                                                                                                 (cond
-                                                                                                   (= :resize lt)
-                                                                                                   (do (refresh-and-layout) (widget/mark-all-dirty))
-                                                                                                   (= :scroll lt)
-                                                                                                   (do
-                                                                                                     (def dir (get leftover :direction))
-                                                                                                     (widget/dispatch :chat
-                                                                                                       {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
+                                                                                                  (def lt (get leftover :type))
+                                                                                                  (cond
+                                                                                                    (= :resize lt)
+                                                                                                    (do (refresh-and-layout) (widget/mark-all-dirty))
+                                                                                                    (= :scroll lt)
+                                                                                                    (do
+                                                                                                      (def dir (get leftover :direction))
+                                                                                                      (widget/dispatch :chat
+                                                                                                        {:type (if (= :up dir) :scroll-line-up :scroll-line-down)}))))
 
                                                                                                  (cond
-                                                                                                 (= result :quit)
-                                                                                                 (do (chat/cleanup) (set should-quit true) (break))
+                                                                                                  (= result :quit)
+                                                                                                  (do (chat/cleanup) (set should-quit true) (break))
 
-                                                                                                 (= result :stop)
-                                                                                                 (chat/stop)
+                                                                                                  (= result :stop)
+                                                                                                  (chat/stop)
 
-                                                                                                 (string? result)
-                                                                                                 (when (not= "" result)
-                                                                                                   (def cmd-result (commands/dispatch result))
-                                                                                                   (if (get cmd-result :handled)
-                                                                                                     (if (= :quit (get cmd-result :result))
-                                                                                                       (do (chat/cleanup) (set should-quit true) (break))
-                                                                                                       (do
-                                                                                                         (chat/output-user result)
-                                                                                                         (def r (get cmd-result :result))
-                                                                                                         (when (and r (not= "" r))
-                                                                                                           (each line (string/split "\n" r)
-                                                                                                             (chat/output-info line)))
-                                                                                                         (widget/mark-dirty :editor)))
-                                                                                                     (chat/submit result)))
+                                                                                                  (string? result)
+                                                                                                  (when (not= "" result)
+                                                                                                    (def cmd-result (commands/dispatch result))
+                                                                                                    (if (get cmd-result :handled)
+                                                                                                      (if (= :quit (get cmd-result :result))
+                                                                                                        (do (chat/cleanup) (set should-quit true) (break))
+                                                                                                        (do
+                                                                                                          (chat/output-user result)
+                                                                                                          (def r (get cmd-result :result))
+                                                                                                          (when (and r (not= "" r))
+                                                                                                            (each line (string/split "\n" r)
+                                                                                                              (chat/output-info line)))
+                                                                                                          (widget/mark-dirty :editor)))
+                                                                                                      (chat/submit result)))
 
-                                                                                                 (and (tuple? result) (= :eval (first result)))
-                                                                                                 (do
-                                                                                                   (def code (get result 1))
-                                                                                                   (when (and code (not= "" code))
-                                                                                                     (eval-janet-inline code)))
+                                                                                                  (and (tuple? result) (= :eval (first result)))
+                                                                                                  (do
+                                                                                                    (def code (get result 1))
+                                                                                                    (when (and code (not= "" code))
+                                                                                                      (eval-janet-inline code)))
 
                                                                                                  # Scroll signals → chat widget
-                                                                                                 (= result :scroll-up)
-                                                                                                 (widget/dispatch :chat {:type :scroll-up})
+                                                                                                  (= result :scroll-up)
+                                                                                                  (widget/dispatch :chat {:type :scroll-up})
 
-                                                                                                 (= result :scroll-down)
-                                                                                                 (widget/dispatch :chat {:type :scroll-down})
+                                                                                                  (= result :scroll-down)
+                                                                                                  (widget/dispatch :chat {:type :scroll-down})
 
-                                                                                                 (= result :scroll-line-up)
-                                                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
-                                                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                                                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                                                  (= result :scroll-line-up)
+                                                                                                  (let [sr (widget/dispatch :chat {:type :scroll-line-up})]
+                                                                                                    (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                                                      (scroll-region-optimize (get sr 1) (get sr 2))))
 
-                                                                                                 (= result :scroll-line-down)
-                                                                                                 (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
-                                                                                                   (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
-                                                                                                     (scroll-region-optimize (get sr 1) (get sr 2))))
+                                                                                                  (= result :scroll-line-down)
+                                                                                                  (let [sr (widget/dispatch :chat {:type :scroll-line-down})]
+                                                                                                    (when (and sr (tuple? sr) (= :scroll-optimized (first sr)))
+                                                                                                      (scroll-region-optimize (get sr 1) (get sr 2))))
 
-                                                                                                 (= result :toggle-thinking)
-                                                                                                 (widget/dispatch :chat {:type :toggle-thinking})
+                                                                                                  (= result :toggle-thinking)
+                                                                                                  (widget/dispatch :chat {:type :toggle-thinking})
 
-                                                                                                 (= result :rerender)
-                                                                                                 (force-rerender)))))))
+                                                                                                  (= result :rerender)
+                                                                                                  (force-rerender)))))))
 
       # 4. Poll RPC server (accept connections, process requests)
                                                    (when rpc-server
@@ -637,7 +636,7 @@
                                                    (profile/with-span "render:frame" "render" (fn [] (render-frame)))))
 
     # Cleanup RPC server if started
-    (when rpc-server
-      (rpc-srv/stop rpc-server))))
+     (when rpc-server
+       (rpc-srv/stop rpc-server)))))
 
-  )  # close defer, defn
+    # close defer, defn
