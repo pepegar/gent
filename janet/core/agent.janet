@@ -150,13 +150,23 @@
   []
   (when (nil? screen-area) (break))
 
-  # If the popup was visible last frame, force-repaint the widgets it
-  # overlapped so their clean cells overwrite the stale popup in prev-buf.
+  # When a popup disappears, force-repaint the widgets it overlapped
+  # so their clean cells overwrite the stale popup in prev-buf.
+  # While popup is still active, skip the force-repaint to avoid flicker.
   (when popup-was-visible
-    (widget/mark-dirty :chat)
-    (widget/mark-dirty :editor)
-    (set popup-was-visible false)
-    (set pending-scroll-opt nil))
+    (if (or (dialog/active?) (completion/active?))
+      (set pending-scroll-opt nil)
+      (do
+        (widget/mark-dirty :chat)
+        (widget/mark-dirty :editor)
+        (set popup-was-visible false)
+        (set pending-scroll-opt nil))))
+
+  # Accumulate all frame output into a single buffer for atomic write.
+  # This prevents flicker when popup overlays cover widget areas — without
+  # batching, the widget diff would briefly flash through the popup before
+  # the overlay redraws on top.
+  (def frame-out @"")
 
   (if (nil? prev-buf)
     # First frame or after resize — full render
@@ -169,7 +179,7 @@
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w (w :rect) buf)))
             (put w :dirty false))))
-      (term/write (tui/buffer->str buf))
+      (buffer/push frame-out (tui/buffer->str buf))
       (set prev-buf buf))
 
     # Incremental: render only dirty widget rects, diff just those areas
@@ -199,7 +209,7 @@
                   (for i 0 (min delta (length dr)) (put dr i true))
                   (for i (max 0 (- (length dr) delta)) (length dr) (put dr i true)))))
             (def diff-str (buffer/diff prev-buf small-buf r))
-            (when (not= "" diff-str) (term/write diff-str)))))))
+            (when (not= "" diff-str) (buffer/push frame-out diff-str)))))))
 
   # Render completion popup overlay (if active)
   (when (and prev-buf screen-area (completion/active?))
@@ -224,7 +234,7 @@
           (tui/buffer-set-char prev-buf x y (cell :ch) st))
         (when (not (empty? parts))
           (array/push parts "\x1b[0m")
-          (term/write (string ;parts))))))
+          (buffer/push frame-out (string ;parts))))))
 
   # Render dialog overlay (if active)
   (when (and prev-buf screen-area (dialog/active?))
@@ -247,7 +257,11 @@
         (tui/buffer-set-char prev-buf x y (cell :ch) st))
       (when (not (empty? parts))
         (array/push parts "\x1b[0m")
-        (term/write (string ;parts)))))
+        (buffer/push frame-out (string ;parts)))))
+
+  # Flush all frame output in a single atomic write
+  (when (> (length frame-out) 0)
+    (term/write (string frame-out)))
 
   # Restore cursor to editor position
   (editor/redraw))
