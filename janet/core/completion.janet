@@ -18,6 +18,7 @@
 
 (import core/commands :as commands)
 (import core/skills :as skills)
+(import core/widget :as widget)
 (import tui)
 
 # ── Popup rendering data ────────────────────────────────────
@@ -269,6 +270,23 @@
   (set commit-cache nil)
   (set commit-cache-time 0))
 
+# ── Source: Layouts ────────────────────────────────────────
+
+(defn- layout-candidates [pfx]
+  (def names (widget/list-layouts))
+  (def results @[])
+  (each name names
+    (def label (string name))
+    (def score (fuzzy-score label pfx))
+    (when score
+      (array/push results
+        @{:label label
+          :detail "layout"
+          :insert label
+          :fuzzy-score score
+          :action [:set-layout name]})))
+  (sort-candidates-by-score results))
+
 # ── Trigger detection ────────────────────────────────────────
 
 (defn check-trigger
@@ -289,6 +307,9 @@
     
     (= ch "#")
     {:kind :commit :start (- pt 1)}
+
+    (= ch "%")
+    {:kind :layout :start (- pt 1)}
 
     nil))
 
@@ -364,6 +385,12 @@
                          "")]
         (commit-candidates after-hash))
 
+      :layout
+      (let [after-pct (if (> (length text-after-trigger) 0)
+                        (string/slice text-after-trigger 1)
+                        "")]
+        (layout-candidates after-pct))
+
       @[]))
 
   (set candidates new-candidates)
@@ -411,9 +438,11 @@
   (when (>= selected (length candidates)) (break nil))
   (def candidate (get candidates selected))
   (when (nil? candidate) (break nil))
-  (def result {:insert (get candidate :insert "")
-               :start trigger-start
-               :end pt})
+  (def result @{:insert (get candidate :insert "")
+                :start trigger-start
+                :end pt})
+  (when (candidate :action)
+    (put result :action (candidate :action)))
   (dismiss)
   result)
 

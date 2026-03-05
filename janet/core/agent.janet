@@ -70,7 +70,7 @@
 
   (def chat-w (widget/get-widget :chat))
   (when (nil? chat-w) (break false))
-  (def cr (chat-w :rect))
+  (def cr (or (chat-w :content-rect) (chat-w :rect)))
   (when (nil? cr) (break false))
 
   (def rh (cr :height))
@@ -321,9 +321,17 @@
     (widget/register (chat/create))
     (widget/register (editor-w/create))
 
+    # Register built-in named layout: focus = distraction-free chat + editor
+    (widget/register-layout :focus default-layout-data)
+
     # Set layout (only if user config hasn't already set one via -l etc.)
     (unless (widget/has-layout?)
       (widget/set-layout-data default-layout-data))
+
+    # Snapshot whatever layout is active (after user config) as :default
+    (widget/register-layout :default (widget/get-layout-data))
+
+    (widget/clear-layout-dirty)
     (refresh-and-layout)
 
     # Focus the editor
@@ -599,8 +607,15 @@
       # 6. Tick widget timers
                                                    (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
 
-      # 7. Re-layout if editor height changed
-                                                   (when (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
+      # 7. Re-layout if editor height changed or layout was swapped
+                                                   (def layout-swap (widget/layout-dirty?))
+                                                   (when (or (not= (editor/get-height) (or ((ui/get-layout) :editor-height) 1))
+                                                             layout-swap)
+                                                     (widget/clear-layout-dirty)
+                                                     # Clear the terminal when layout changes so stale widget
+                                                     # content doesn't bleed through in uncovered areas.
+                                                     (when layout-swap
+                                                       (term/write "\x1b[2J"))
                                                      (refresh-and-layout)
                                                      (widget/mark-all-dirty))
 

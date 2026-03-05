@@ -269,6 +269,7 @@
 (var- layout-fn nil)
 (var- layout-data nil)
 (var- named-layouts @{})
+(var- layout-dirty false)
 
 (defn register-layout
   "Register a named layout (function or declarative data structure).
@@ -277,33 +278,57 @@
   [name layout]
   (put named-layouts name layout))
 
+(defn list-layouts
+  "Return an array of registered layout names."
+  []
+  (sort (array ;(keys named-layouts))))
+
 (defn set-layout
   "Switch to a named layout."
   [name]
   (def layout (get named-layouts name))
   (if (function? layout)
     (do (set layout-fn layout) (set layout-data nil))
-    (do (set layout-data layout) (set layout-fn nil))))
+    (do (set layout-data layout) (set layout-fn nil)))
+  (set layout-dirty true))
 
 (defn set-layout-fn
   "Set a custom layout function directly."
   [f]
   (set layout-fn f)
-  (set layout-data nil))
+  (set layout-data nil)
+  (set layout-dirty true))
 
 (defn set-layout-data
   "Set a declarative layout data structure directly."
   [data]
   (set layout-data data)
-  (set layout-fn nil))
+  (set layout-fn nil)
+  (set layout-dirty true))
+
+(defn layout-dirty?
+  "Return true if the layout has changed since last consumed."
+  []
+  layout-dirty)
+
+(defn clear-layout-dirty
+  "Clear the layout dirty flag after re-layout."
+  []
+  (set layout-dirty false))
 
 (defn has-layout?
   "Return true if a layout function or data has been set."
   []
   (or (not (nil? layout-fn)) (not (nil? layout-data))))
 
+(defn get-layout-data
+  "Return the current layout data, or nil if using a layout function."
+  []
+  layout-data)
+
 (defn do-layout
   "Run the layout and assign rects to widgets.
+   Clears rects for widgets not in the new layout so they stop rendering.
    Returns the assignments table."
   [area]
   (def assignments
@@ -312,6 +337,10 @@
       layout-fn   (layout-fn area)
       nil))
   (when assignments
+    # Clear all widget rects first, then assign new ones.
+    # This ensures widgets not in the new layout stop rendering.
+    (eachp [name w] widgets
+      (when w (put w :rect nil)))
     (eachp [name rect] assignments
       (when-let [w (get widgets name)]
         (put w :rect rect)))

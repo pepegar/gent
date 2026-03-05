@@ -24,26 +24,39 @@
 # ── Helpers ────────────────────────────────────────────────────
 
 (defn- setup [&opt width height]
-  "Set up a chat widget with a fixed-size viewport."
+  "Set up a chat widget with a fixed-size viewport.
+   Width and height refer to the content area; the actual buffer is +2 for the border."
   (default width 40)
   (default height 10)
   (chat/reset-state)
   (each name (widget/list-widgets) (widget/unregister name))
   (def w (chat/create))
   (widget/register w)
-  (def r (tui/rect 0 0 width height))
+  (def bw (+ width 2))
+  (def bh (+ height 2))
+  (def r (tui/rect 0 0 bw bh))
   (widget/set-layout-fn (fn [a] @{:chat r}))
-  (widget/do-layout (tui/rect 0 0 width (+ height 2)))
+  (widget/do-layout (tui/rect 0 0 bw (+ bh 2)))
   w)
 
 (defn- render-chat [w &opt width height]
-  "Render the chat widget into a buffer and return plain text rows."
+  "Render the chat widget into a buffer and return plain text rows for the content area only.
+   Reads cells directly from the inner area (offset by 1,1 for the border)."
   (default width 40)
   (default height 10)
-  (def r (tui/rect 0 0 width height))
+  (def bw (+ width 2))
+  (def bh (+ height 2))
+  (def r (tui/rect 0 0 bw bh))
   (def buf (tui/buffer r))
   ((w :render) w r buf)
-  (tui/buffer-to-plain-rows buf))
+  (def content-rows @[])
+  (for row 0 height
+    (def chars @[])
+    (for col 0 width
+      (def cell (tui/buffer-get buf (+ col 1) (+ row 1)))
+      (array/push chars (cell :ch)))
+    (array/push content-rows (string/trimr (string ;chars))))
+  content-rows)
 
 (defn- row-contains? [rows y text]
   "Check if row y contains the given text."
@@ -317,19 +330,28 @@
 # ── Row background color tests ─────────────────────────────
 
 (defn- render-buf [w &opt width height]
-  "Render the chat widget into a buffer and return the buffer."
+  "Render the chat widget into a buffer and return the buffer.
+   Width/height are content area; buffer is +2 for border."
   (default width 40)
   (default height 10)
-  (def r (tui/rect 0 0 width height))
+  (def bw (+ width 2))
+  (def bh (+ height 2))
+  (def r (tui/rect 0 0 bw bh))
   (def buf (tui/buffer r))
   ((w :render) w r buf)
   buf)
+
+(defn- content-cell
+  "Get a cell from the content area (coordinates are relative to content, not buffer).
+   Adds +1 to x and y to skip the border."
+  [buf x y]
+  (tui/buffer-get buf (+ x 1) (+ y 1)))
 
 (t/test "snapshot: user message has gutter bar" (fn []
                                                  (def w (setup))
                                                  (chat/output-user "hello")
                                                  (def buf (render-buf w))
-                                                 (def cell (tui/buffer-get buf 0 9))
+                                                 (def cell (content-cell buf 0 9))
                                                  (t/assert= (cell :ch) "▐")))
 
 (t/test "snapshot: agent message has gutter bar" (fn []
@@ -337,21 +359,21 @@
                                                   (chat/output-agent "response text")
                                                   (def buf (render-buf w))
   # Agent text is on row 8; row 9 is the margin-bottom blank line
-                                                  (def cell (tui/buffer-get buf 0 8))
+                                                  (def cell (content-cell buf 0 8))
                                                   (t/assert= (cell :ch) "▐")))
 
 (t/test "snapshot: tool call has gutter bar" (fn []
                                               (def w (setup))
                                               (chat/output-tool "bash" "ls")
                                               (def buf (render-buf w))
-                                              (def cell (tui/buffer-get buf 0 9))
+                                              (def cell (content-cell buf 0 9))
                                               (t/assert= (cell :ch) "▐")))
 
 (t/test "snapshot: tool result has gutter bar" (fn []
                                                 (def w (setup))
                                                 (chat/output-tool-result "ok")
                                                 (def buf (render-buf w))
-                                                (def cell (tui/buffer-get buf 0 9))
+                                                (def cell (content-cell buf 0 9))
                                                 (t/assert= (cell :ch) "▐")))
 
 (t/test "snapshot: tool error and success both have gutter bars" (fn []
@@ -359,8 +381,8 @@
                                                                   (chat/output-tool-result "success result" true)
                                                                   (chat/output-tool-result "Error: something failed" false)
                                                                   (def buf (render-buf w 60 10))
-                                                                  (def success-cell (tui/buffer-get buf 0 8))
-                                                                  (def error-cell (tui/buffer-get buf 0 9))
+                                                                  (def success-cell (content-cell buf 0 8))
+                                                                  (def error-cell (content-cell buf 0 9))
                                                                   (t/assert= (success-cell :ch) "▐")
                                                                   (t/assert= (error-cell :ch) "▐")))
 
@@ -368,8 +390,8 @@
                                                     (def w (setup 40 10))
                                                     (chat/output-user "hi")
                                                     (def buf (render-buf w 40 10))
-                                                    (def cell-start (tui/buffer-get buf 0 9))
-                                                    (def cell-end (tui/buffer-get buf 39 9))
+                                                    (def cell-start (content-cell buf 0 9))
+                                                    (def cell-end (content-cell buf 39 9))
                                                     (t/assert= (cell-start :ch) "▐")
                                                     (t/assert-truthy (not= (cell-end :ch) "▐"))))
 
@@ -379,7 +401,7 @@
                                                   (chat/set-colors @{:user-label custom-label})
                                                   (chat/output-user "custom label test")
                                                   (def buf (render-buf w))
-                                                  (def cell (tui/buffer-get buf 0 9))
+                                                  (def cell (content-cell buf 0 9))
                                                   (t/assert= (get (cell :style) :fg) [:rgb 99 99 99])
                                                   (chat/set-theme :dark)))
 
@@ -388,7 +410,7 @@
                                                  (chat/set-theme :light)
                                                  (chat/output-user "light mode")
                                                  (def buf (render-buf w))
-                                                 (def cell (tui/buffer-get buf 0 9))
+                                                 (def cell (content-cell buf 0 9))
                                                  (t/assert= (cell :ch) "▐")
                                                  (t/assert-truthy (get (cell :style) :fg))
                                                  (chat/set-theme :dark)))
@@ -415,7 +437,7 @@
                                                       (chat/auto-theme)
                                                       (chat/output-user "test")
                                                       (def buf2 (render-buf w))
-                                                      (def cell (tui/buffer-get buf2 0 9))
+                                                      (def cell (content-cell buf2 0 9))
                                                       (t/assert= (cell :ch) "▐")
                                                       (chat/set-theme :dark)))
 

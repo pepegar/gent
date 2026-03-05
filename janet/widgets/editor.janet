@@ -117,22 +117,32 @@
   (def pt (ed/point editor-state))
   (def result (completion/accept pt))
   (when result
-    (def start (result :start))
-    (def end (result :end))
-    (def insert-text (result :insert))
-
-    # Delete from trigger-start to current point, then insert
-    (def buf (editor-state :buf))
-    (when (> end start)
-      (buffers/delete buf start end))
-    (buffers/insert buf start insert-text)
-    (buffers/set-point buf (+ start (length insert-text)))
-
-    # Add styled span for the inserted completion
-    (ed/add-styled-span editor-state start (+ start (length insert-text))
-      (completion/get-style))
-
-    (put self :dirty true)))
+    (if (result :action)
+      (do
+        # Action-based completion: execute the action and clear the trigger text
+        (def start (result :start))
+        (def end (result :end))
+        (def buf (editor-state :buf))
+        (when (> end start)
+          (buffers/delete buf start end))
+        (buffers/set-point buf start)
+        (def [action-type & action-args] (result :action))
+        (case action-type
+          :set-layout (widget/set-layout (first action-args)))
+        (put self :dirty true))
+      (do
+        # Text-insertion completion
+        (def start (result :start))
+        (def end (result :end))
+        (def insert-text (result :insert))
+        (def buf (editor-state :buf))
+        (when (> end start)
+          (buffers/delete buf start end))
+        (buffers/insert buf start insert-text)
+        (buffers/set-point buf (+ start (length insert-text)))
+        (ed/add-styled-span editor-state start (+ start (length insert-text))
+          (completion/get-style))
+        (put self :dirty true)))))
 
 # ── Batch mode ───────────────────────────────────────────────
 

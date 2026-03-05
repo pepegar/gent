@@ -1528,6 +1528,7 @@
   @{:name :chat
     :state @{}
     :rect nil
+    :content-rect nil
     :dirty true
     :focused false
     :tasks @[]
@@ -1538,8 +1539,9 @@
              # Handle arrow keys when focused for message navigation
              (when (and (= etype :key) (get self :focused))
                (def key (get event :key))
-               (def width (if (self :rect) ((self :rect) :width) 80))
-               (def height (if (self :rect) ((self :rect) :height) 10))
+               (def cr (or (self :content-rect) (self :rect)))
+               (def width (if cr (cr :width) 80))
+               (def height (if cr (cr :height) 10))
                (def max-offset (max 0 (- (total-visual-rows width) height)))
                (cond
                  (= key :up)
@@ -1576,20 +1578,22 @@
                (= etype :submit) (submit (event :text))
                (= etype :stop) (stop)
                (= etype :scroll-up)
-               (let [width (if (self :rect) ((self :rect) :width) 80)
-                     height (if (self :rect) ((self :rect) :height) 10)
+               (let [cr (or (self :content-rect) (self :rect))
+                     width (if cr (cr :width) 80)
+                     height (if cr (cr :height) 10)
                      page-size (max 1 (- height 2))
                      max-offset (max 0 (- (total-visual-rows width) height))]
                  (set scroll-offset (min max-offset (+ scroll-offset page-size)))
                  (widget/mark-dirty :chat))
                (= etype :scroll-down)
-               (do
-                 (def page-size (if (self :rect) (max 1 (- ((self :rect) :height) 2)) 10))
+               (let [cr (or (self :content-rect) (self :rect))]
+                 (def page-size (if cr (max 1 (- (cr :height) 2)) 10))
                  (set scroll-offset (max 0 (- scroll-offset page-size)))
                  (widget/mark-dirty :chat))
                (= etype :scroll-line-up)
-               (let [width (if (self :rect) ((self :rect) :width) 80)
-                     height (if (self :rect) ((self :rect) :height) 10)
+               (let [cr (or (self :content-rect) (self :rect))
+                     width (if cr (cr :width) 80)
+                     height (if cr (cr :height) 10)
                      n (or (get event :lines) 1)
                      max-offset (max 0 (- (total-visual-rows width) height))
                      old-offset scroll-offset]
@@ -1613,4 +1617,14 @@
     :update (fn [self] (tick))
 
     :render (fn [self rect buf]
-             (render-scrollback rect buf))})
+             (def border-color
+               (if (self :focused)
+                 (tui/color-indexed 75)
+                 (tui/color-indexed 240)))
+             (def blk (tui/block :title " Chat " :borders :all :border-type :rounded
+                                  :border-style (tui/style :fg border-color)))
+             (tui/render blk rect buf)
+             (def inner (tui/block-inner blk rect))
+             (put self :content-rect inner)
+             (when (and (> (inner :height) 0) (> (inner :width) 0))
+               (render-scrollback inner buf)))})

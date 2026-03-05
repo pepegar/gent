@@ -24,16 +24,21 @@
   (each name (widget/list-widgets) (widget/unregister name))
   (def w (chat/create))
   (widget/register w)
-  (widget/set-layout-fn (fn [a] @{:chat (tui/rect 0 0 80 22)}))
-  (widget/do-layout (tui/rect 0 0 80 24))
+  (def r (tui/rect 0 0 82 24))
+  (widget/set-layout-fn (fn [a] @{:chat r}))
+  (widget/do-layout (tui/rect 0 0 82 26))
+  # Render once to populate :content-rect (used by scroll calculations)
+  (def buf (tui/buffer r))
+  ((w :render) w r buf)
   w)
 
 (defn- read-buffer-row
-  "Extract the text content of a buffer row (strip trailing spaces)."
+  "Extract the text content of a content-area row (strip trailing spaces).
+   Content coordinates: y is 0-indexed within the content area (border offset +1)."
   [buf y width]
   (def chars @[])
   (for x 0 width
-    (array/push chars ((tui/buffer-get buf x y) :ch)))
+    (array/push chars ((tui/buffer-get buf (+ x 1) (+ y 1)) :ch)))
   (string/trimr (string ;chars)))
 
 # ── Scrollback tests ───────────────────────────────────────────
@@ -176,20 +181,20 @@
 
 (t/test "render empty scrollback into buffer" (fn []
                                                (def w (setup))
-                                               (def rect (tui/rect 0 0 80 22))
+                                               (def rect (tui/rect 0 0 82 24))
                                                (def buf (tui/buffer rect))
                                                ((w :render) w rect buf)
-  # All cells should be spaces
-                                               (t/assert= ((tui/buffer-get buf 0 0) :ch) " ")
-                                               (t/assert= ((tui/buffer-get buf 79 21) :ch) " ")))
+  # Content area cells should be spaces (offset by 1,1 for border)
+                                               (t/assert= ((tui/buffer-get buf 1 1) :ch) " ")
+                                               (t/assert= ((tui/buffer-get buf 80 22) :ch) " ")))
 
 (t/test "render scrollback text appears in buffer" (fn []
                                                     (def w (setup))
                                                     (chat/output "hello world")
-                                                    (def rect (tui/rect 0 0 80 22))
+                                                    (def rect (tui/rect 0 0 82 24))
                                                     (def buf (tui/buffer rect))
                                                     ((w :render) w rect buf)
-  # "hello world" should be at the bottom row (pinned to bottom)
+  # "hello world" should be at the bottom content row (pinned to bottom)
                                                     (def row-text (read-buffer-row buf 21 80))
                                                     (t/assert-truthy (string/find "hello world" row-text))))
 
@@ -198,10 +203,10 @@
                                                   (chat/output "first")
                                                   (chat/output "second")
                                                   (chat/output "third")
-                                                  (def rect (tui/rect 0 0 80 22))
+                                                  (def rect (tui/rect 0 0 82 24))
                                                   (def buf (tui/buffer rect))
                                                   ((w :render) w rect buf)
-  # Last 3 rows should have content
+  # Last 3 content rows should have content
                                                   (def row19 (read-buffer-row buf 19 80))
                                                   (def row20 (read-buffer-row buf 20 80))
                                                   (def row21 (read-buffer-row buf 21 80))
@@ -214,7 +219,7 @@
   # Add 25 lines (more than the 22-row viewport)
                                                  (for i 0 25 (chat/output (string "line-" i)))
   # Render pinned to bottom (offset=0): should show lines 3-24
-                                                 (def rect (tui/rect 0 0 80 22))
+                                                 (def rect (tui/rect 0 0 82 24))
                                                  (def buf1 (tui/buffer rect))
                                                  ((w :render) w rect buf1)
                                                  (def bottom-row1 (read-buffer-row buf1 21 80))
@@ -232,10 +237,10 @@
 (t/test "render spans (user message) into buffer" (fn []
                                                    (def w (setup))
                                                    (chat/output-user "hello from user")
-                                                   (def rect (tui/rect 0 0 80 22))
+                                                   (def rect (tui/rect 0 0 82 24))
                                                    (def buf (tui/buffer rect))
                                                    ((w :render) w rect buf)
-  # The bottom row should contain "you" label and user text
+  # The bottom content row should contain "you" label and user text
                                                    (def row-text (read-buffer-row buf 21 80))
                                                    (t/assert-truthy (string/find "user:" row-text))
                                                    (t/assert-truthy (string/find "hello from user" row-text))))
