@@ -1545,18 +1545,16 @@
                (def max-offset (max 0 (- (total-visual-rows width) height)))
                (cond
                  (= key :up)
-                 # Navigate up (scroll up by 1 line, wrapping at top)
+                 # Navigate up (scroll up by 1 line, clamped at top)
                  (do
-                   (def new-offset (+ scroll-offset 1))
-                   (set scroll-offset (if (> new-offset max-offset) 0 new-offset))
+                   (set scroll-offset (min max-offset (+ scroll-offset 1)))
                    (widget/mark-dirty :chat)
                    (break nil))
 
                  (= key :down)
-                 # Navigate down (scroll down by 1 line, wrapping at bottom)
+                 # Navigate down (scroll down by 1 line, clamped at bottom)
                  (do
-                   (def new-offset (- scroll-offset 1))
-                   (set scroll-offset (if (< new-offset 0) max-offset new-offset))
+                   (set scroll-offset (max 0 (- scroll-offset 1)))
                    (widget/mark-dirty :chat)
                    (break nil))
 

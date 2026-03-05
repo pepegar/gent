@@ -243,6 +243,34 @@
                                      (dialog/submit)
                                      (t/assert-falsy (dialog/active?))))
 
+# ── String type keys (from JSON/tool input) ──────────────────
+
+(t/test "show with string type \"confirm\" works" (fn []
+                                                   (dialog/reset-state)
+                                                   (def rb (dialog/show {:type "confirm" :title "Continue?"}))
+                                                   (t/assert-truthy (dialog/active?))
+                                                   (t/assert= (dialog/get-type) :confirm)
+                                                   (dialog/submit)
+                                                   (t/assert= (rb :value) "yes")))
+
+(t/test "show with string type \"select\" works" (fn []
+                                                  (dialog/reset-state)
+                                                  (def rb (dialog/show {:type "select" :title "Pick"
+                                                                        :options [{:label "X" :value "x"}]}))
+                                                  (t/assert-truthy (dialog/active?))
+                                                  (t/assert= (dialog/get-type) :select)
+                                                  (dialog/submit)
+                                                  (t/assert= (rb :value) "x")))
+
+(t/test "show with string type \"input\" works" (fn []
+                                                 (dialog/reset-state)
+                                                 (def rb (dialog/show {:type "input" :title "Name?"}))
+                                                 (t/assert-truthy (dialog/active?))
+                                                 (t/assert= (dialog/get-type) :input)
+                                                 (dialog/input-insert "hi")
+                                                 (dialog/submit)
+                                                 (t/assert= (rb :value) "hi")))
+
 # ── Async tool integration ───────────────────────────────────
 
 (t/test "result-box poll pattern" (fn []

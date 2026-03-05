@@ -52,7 +52,8 @@
    opts: {:type :select|:confirm|:input :title string
           :options [{:label :value}] :default string}"
   [opts]
-  (set dialog-type (get opts :type :select))
+  (def raw-type (get opts :type :select))
+  (set dialog-type (if (string? raw-type) (keyword raw-type) raw-type))
   (set title (get opts :title ""))
   (set options
     (case dialog-type
