@@ -905,6 +905,10 @@
 (def- spinner-interval 167)
 (var- spinner-state @{:active false :frame 0 :message "" :last-tick 0})
 
+(defn get-spinner-state
+  "Return the spinner state table (for testing)."
+  [] spinner-state)
+
 (defn- spinner-start [msg]
   (put spinner-state :active true)
   (put spinner-state :frame 0)
@@ -961,7 +965,15 @@
                   (put (last scrollback) :row-style :thinking-row-bg)))))
           nil))
       (widget/mark-dirty :chat))
-    (spinner-start (string "thinking (" (format-char-count (thinking-state :char-count)) " chars)…"))))
+    (do
+      (def msg (string "thinking (" (format-char-count (thinking-state :char-count)) " chars)…"))
+      (if (spinner-active?)
+        # Update message without resetting frame/tick — prevents static spinner
+        # when thinking deltas arrive faster than the animation interval
+        (do
+          (put spinner-state :message msg)
+          (widget/mark-dirty :chat))
+        (spinner-start msg)))))
 
 (defn- thinking-end-block []
   "Push the buffered thinking content as a collapsed block in scrollback."

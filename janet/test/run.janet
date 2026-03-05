@@ -41,6 +41,7 @@
    "test/test-stage"
    "test/test-scenario"
    "test/test-thinking"
+   "test/test-spinner"
    "test/test-editor-scroll"
    "test/test-dialog"
    "test/test-rpc"
