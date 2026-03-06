@@ -420,8 +420,6 @@
   (defn- add-text-chars [text style]
     (var ci 0)
     (while (< ci (length text))
-      (when (>= col width)
-        (word-wrap-flush))
       (def byte (get text ci))
       # Handle newlines explicitly - they should force a row break
       (if (= byte (chr "\n"))
@@ -433,8 +431,12 @@
             (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
           (def cend (min (+ ci char-len) (length text)))
           (def ch (string/slice text ci cend))
-          (array/push current-row @{:text ch :style style})
-          (++ col)
+          (def w (tui/char-width ch))
+          (when (and (> w 0) (> (+ col w) width))
+            (word-wrap-flush))
+          (when (> w 0)
+            (array/push current-row @{:text ch :style style})
+            (+= col w))
           (set ci cend)))))
 
   (if (line :spans)
@@ -1511,8 +1513,14 @@
     (var col content-x)
     (each cell row
       (when (>= col row-end) (break))
-      (tui/buffer-set-char buf col y (cell :text) (cell :style))
-      (++ col))
+      (def ch (cell :text))
+      (def w (tui/char-width ch))
+      (when (and (> w 1) (> (+ col w) row-end)) (break))
+      (tui/buffer-set-char buf col y ch (cell :style))
+      (when (= w 2)
+        (when (< (+ col 1) row-end)
+          (tui/buffer-set-char buf (+ col 1) y "" (cell :style))))
+      (+= col (if (> w 0) w 1)))
     (when rs
       (def gutter-color
         (cond

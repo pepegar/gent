@@ -43,6 +43,7 @@
    "test/test-thinking"
    "test/test-spinner"
    "test/test-editor-scroll"
+   "test/test-charwidth"
    "test/test-dialog"
    "test/test-rpc"
    "test/test-headless"

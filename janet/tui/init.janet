@@ -33,6 +33,7 @@
 # Import all sub-modules
 (use ./rect)
 (use ./style)
+(use ./charwidth)
 (use ./buffer)
 (use ./text)
 (use ./block)

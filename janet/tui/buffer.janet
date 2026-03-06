@@ -11,6 +11,7 @@
 
 (use ./rect)
 (use ./style)
+(use ./charwidth)
 
 # ── Cell ───────────────────────────────────────────────────────
 
@@ -83,12 +84,14 @@
         (put dr row true)))))
 
 (defn buffer-set-string
-  "Write a string horizontally starting at (x, y). Handles UTF-8. Clips to buffer bounds."
+  "Write a string horizontally starting at (x, y). Handles UTF-8 and wide chars. Clips to buffer bounds."
   [buf x y text &opt st]
   (default st style-default)
   (var col x)
   (var i 0)
   (def len (length text))
+  (def a (buf :area))
+  (def right (rect-right a))
   (while (< i len)
     (def byte (get text i))
     # Skip newlines and other control characters - they shouldn't be rendered
@@ -104,9 +107,20 @@
             4))
         (def end (min (+ i char-len) len))
         (def ch (string/slice text i end))
-        (buffer-set-char buf col y ch st)
-        (++ col)
-        (set i end)))))
+        (def w (char-width ch))
+        (if (= w 0)
+          # Zero-width char: skip without advancing column
+          (set i end)
+          (do
+            # Check if char fits (wide chars need 2 columns)
+            (when (> (+ col w) right) (break))
+            (buffer-set-char buf col y ch st)
+            (when (= w 2)
+              # Wide char: fill continuation cell
+              (when (< (+ col 1) right)
+                (buffer-set-char buf (+ col 1) y "" st)))
+            (+= col w)
+            (set i end)))))))
 
 (defn buffer-set-style
   "Apply a style to all cells within a rect (merged on top of existing)."
@@ -137,7 +151,8 @@
 
 (defn buffer-to-plain-rows
   "Convert the buffer to an array of plain text strings (no ANSI escapes).
-   Trailing spaces are trimmed from each row. Useful for snapshot testing."
+   Trailing spaces are trimmed from each row. Useful for snapshot testing.
+   Handles wide chars: skips continuation cells (empty ch)."
   [buf]
   (def a (buf :area))
   (def rows @[])
@@ -145,7 +160,10 @@
     (def chars @[])
     (for col 0 (a :width)
       (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
-      (array/push chars (c :ch)))
+      (def ch (c :ch))
+      (if (= ch "")
+        nil  # skip continuation cell
+        (array/push chars ch)))
     (array/push rows (string/trimr (string ;chars))))
   rows)
 
@@ -159,7 +177,9 @@
 
 (defn buffer-diff
   "Compare two buffers cell-by-cell. Returns an ANSI string that updates
-   only the changed cells. Both buffers must cover the same area."
+   only the changed cells. Both buffers must cover the same area.
+   Handles wide characters: skips continuation cells (empty ch) and
+   accounts for wide chars advancing the cursor by 2."
   [old-buf new-buf]
   (def a (new-buf :area))
   (def parts @[])
@@ -167,25 +187,37 @@
 
   (for row 0 (a :height)
     (var expected-col nil)
-    (for col 0 (a :width)
+    (var col 0)
+    (while (< col (a :width))
       (def x (+ (a :x) col))
       (def y (+ (a :y) row))
       (def old-cell (buffer-get old-buf x y))
       (def new-cell (buffer-get new-buf x y))
-      (unless (and (= (old-cell :ch) (new-cell :ch))
-                   (style= (old-cell :style) (new-cell :style)))
-        # Cell changed — emit cursor move if not at expected position
-        (when (or (nil? expected-col) (not= col expected-col))
-          (array/push parts
-            (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
-        (def st (new-cell :style))
-        (when (not (style= st cur-style))
-          (array/push parts "\x1b[0m")
-          (def sgr (style->sgr st))
-          (when (not= sgr "") (array/push parts sgr))
-          (set cur-style st))
-        (array/push parts (new-cell :ch))
-        (set expected-col (+ col 1)))))
+      (def ch (new-cell :ch))
+      (def is-continuation (= ch ""))
+      (if is-continuation
+        (do
+          # Wide char continuation cell — skip, the wide char already covers this
+          (++ col))
+        (do
+          (unless (and (= (old-cell :ch) ch)
+                       (style= (old-cell :style) (new-cell :style)))
+            # Cell changed — emit cursor move if not at expected position
+            (when (or (nil? expected-col) (not= col expected-col))
+              (array/push parts
+                (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
+            (def st (new-cell :style))
+            (when (not (style= st cur-style))
+              (array/push parts "\x1b[0m")
+              (def sgr (style->sgr st))
+              (when (not= sgr "") (array/push parts sgr))
+              (set cur-style st))
+            (array/push parts ch)
+            # Wide chars advance cursor by 2
+            (def w (char-width ch))
+            (set expected-col (+ col w)))
+          (def w (char-width ch))
+          (set col (+ col (if (> w 0) w 1)))))))
 
   (when (not (empty? parts))
     (array/push parts "\x1b[0m"))
@@ -195,7 +227,8 @@
 
 (defn buffer->str
   "Convert the entire buffer to an ANSI escape-coded string.
-   Moves the cursor to each row and emits style changes as needed."
+   Moves the cursor to each row and emits style changes as needed.
+   Handles wide characters: skips continuation cells."
   [buf]
   (def parts @[])
   (def a (buf :area))
@@ -205,22 +238,31 @@
     # Move cursor to start of row (ANSI is 1-indexed)
     (array/push parts
       (string/format "\x1b[%d;%dH" (+ (a :y) row 1) (+ (a :x) 1)))
-    (for col 0 (a :width)
+    (var col 0)
+    (while (< col (a :width))
       (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
-      (def st (c :style))
-      (when (not (style= st cur-style))
-        (array/push parts "\x1b[0m")
-        (def sgr (style->sgr st))
-        (when (not= sgr "") (array/push parts sgr))
-        (set cur-style st))
-      (array/push parts (c :ch))))
+      (def ch (c :ch))
+      (if (= ch "")
+        # Wide char continuation — skip
+        (++ col)
+        (do
+          (def st (c :style))
+          (when (not (style= st cur-style))
+            (array/push parts "\x1b[0m")
+            (def sgr (style->sgr st))
+            (when (not= sgr "") (array/push parts sgr))
+            (set cur-style st))
+          (array/push parts ch)
+          (def w (char-width ch))
+          (set col (+ col (if (> w 0) w 1)))))))
 
   (array/push parts "\x1b[0m")
   (string ;parts))
 
 (defn buffer->rows
   "Convert the buffer to an array of ANSI-styled row strings (no cursor movement).
-   Each element is one row, ready to be printed line-by-line."
+   Each element is one row, ready to be printed line-by-line.
+   Handles wide characters: skips continuation cells."
   [buf]
   (def a (buf :area))
   (def rows @[])
@@ -228,15 +270,23 @@
   (for row 0 (a :height)
     (def parts @[])
     (var cur-style nil)
-    (for col 0 (a :width)
+    (var col 0)
+    (while (< col (a :width))
       (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
-      (def st (c :style))
-      (when (not (style= st cur-style))
-        (array/push parts "\x1b[0m")
-        (def sgr (style->sgr st))
-        (when (not= sgr "") (array/push parts sgr))
-        (set cur-style st))
-      (array/push parts (c :ch)))
+      (def ch (c :ch))
+      (if (= ch "")
+        # Wide char continuation — skip
+        (++ col)
+        (do
+          (def st (c :style))
+          (when (not (style= st cur-style))
+            (array/push parts "\x1b[0m")
+            (def sgr (style->sgr st))
+            (when (not= sgr "") (array/push parts sgr))
+            (set cur-style st))
+          (array/push parts ch)
+          (def w (char-width ch))
+          (set col (+ col (if (> w 0) w 1))))))
     (array/push parts "\x1b[0m")
     (array/push rows (string ;parts)))
 

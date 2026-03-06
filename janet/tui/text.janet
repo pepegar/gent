@@ -18,6 +18,7 @@
 
 (use ./rect)
 (use ./style)
+(use ./charwidth)
 (use ./buffer)
 
 # ── Inline ANSI rendering ──────────────────────────────────────
@@ -64,9 +65,9 @@
   {:type :span :text content :style st})
 
 (defn span-width
-  "Visual width of a span (byte length; no wide-char support yet)."
+  "Visual width of a span (display columns, handling wide chars)."
   [s]
-  (length (s :text)))
+  (string-width (s :text)))
 
 # ── Line ───────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@
 
 (defn- render-line
   "Render a single line into the buffer at row y, starting at x.
-   Clips to the given max-width."
+   Clips to the given max-width. Handles UTF-8 and wide characters."
   [ln x y max-width buf]
   (var col x)
   (def limit (+ x max-width))
@@ -92,10 +93,25 @@
     (when (>= col limit) (break))
     (def text (s :text))
     (def st (s :style))
-    (each byte text
+    (var i 0)
+    (while (< i (length text))
       (when (>= col limit) (break))
-      (buffer-set-char buf col y (string/from-bytes byte) st)
-      (++ col))))
+      (def byte (get text i))
+      (def char-len
+        (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+      (def end (min (+ i char-len) (length text)))
+      (def ch (string/slice text i end))
+      (def w (char-width ch))
+      (when (and (> w 0) (> (+ col w) limit)) (break))
+      (if (= w 0)
+        (set i end)
+        (do
+          (buffer-set-char buf col y ch st)
+          (when (= w 2)
+            (when (< (+ col 1) limit)
+              (buffer-set-char buf (+ col 1) y "" st)))
+          (+= col w)
+          (set i end))))))
 
 # ── Text widget ────────────────────────────────────────────────
 
