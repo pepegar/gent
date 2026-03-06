@@ -19,6 +19,7 @@
 (import core/commands :as commands)
 (import core/skills :as skills)
 (import core/widget :as widget)
+(import core/fuzzy :as fuzzy)
 (import tui)
 
 # ── Popup rendering data ────────────────────────────────────
@@ -71,95 +72,12 @@
   (set file-cache nil)
   (set file-cache-time 0))
 
-# ── Fuzzy matching (zf-style) ──────────────────────────────
-#
-# Scoring algorithm adapted from natecraddock/zf.
-# Lower score = better match. Key properties:
-#   - Multi-start: tries every occurrence of the first char, keeps best
-#   - Word boundaries (/ _ - . space) avoid penalties
-#   - Consecutive chars are cheap: first in a run costs 1.0, rest are free
-#   - Gaps penalized by distance + 2.0 if not at a word boundary
-
-(defn- word-boundary? [byte]
-  (case byte
-    (chr "/") true
-    (chr "_") true
-    (chr "-") true
-    (chr ".") true
-    (chr " ") true
-    false))
-
-(defn- scan-to-end
-  "Try to match remaining token chars left-to-right from start-idx.
-   Returns {:rank <float> :matches [...]} or nil. Lower rank = better."
-  [str token start-idx]
-  (var rank 1.0)
-  (def matches @[start-idx])
-
-  (when (and (> start-idx 0)
-             (not (word-boundary? (get str (- start-idx 1)))))
-    (+= rank 2.0))
-
-  (var last-idx start-idx)
-  (var last-sequential false)
-  (var failed false)
-
-  (for i 0 (length token)
-    (def ch (get token i))
-    (var found-idx nil)
-    (for j (+ last-idx 1) (length str)
-      (when (= ch (get str j))
-        (set found-idx j)
-        (break)))
-    (when (nil? found-idx)
-      (set failed true)
-      (break))
-
-    (if (= found-idx (+ last-idx 1))
-      (do
-        (when (not last-sequential)
-          (set last-sequential true)
-          (+= rank 1.0)))
-      (do
-        (set last-sequential false)
-        (when (not (word-boundary? (get str (- found-idx 1))))
-          (+= rank 2.0))
-        (+= rank (- found-idx last-idx))))
-
-    (array/push matches found-idx)
-    (set last-idx found-idx))
-
-  (if failed nil {:rank rank :matches matches}))
-
-(defn- fuzzy-score
-  "Calculate fuzzy match score for target against query.
-   Returns {:score <number> :matches [pos1 pos2 ...]} or nil if no match.
-   Lower score is better (like zf)."
-  [target query]
-  (when (empty? target) (break nil))
-  (when (empty? query) (break {:score math/inf :matches @[]}))
-
-  (def ltarget (string/ascii-lower target))
-  (def lquery (string/ascii-lower query))
-  (def first-char (get lquery 0))
-  (def rest-query (string/slice lquery 1))
-
-  (var best nil)
-
-  (for i 0 (length ltarget)
-    (when (= (get ltarget i) first-char)
-      (def result (scan-to-end ltarget rest-query i))
-      (when result
-        (when (or (nil? best) (< (result :rank) (best :rank)))
-          (set best result)))))
-
-  (when (nil? best) (break nil))
-  {:score (best :rank) :matches (best :matches)})
+# ── Fuzzy matching (delegated to core/fuzzy) ────────────────
 
 (defn- make-candidate
   "Create a candidate with fuzzy score."
   [label detail insert target query]
-  (def score (fuzzy-score target query))
+  (def score (fuzzy/score target query))
   (when score
     {:label label
      :detail detail
@@ -277,7 +195,7 @@
   (def results @[])
   (each name names
     (def label (string name))
-    (def score (fuzzy-score label pfx))
+    (def score (fuzzy/score label pfx))
     (when score
       (array/push results
         @{:label label

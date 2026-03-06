@@ -50,6 +50,7 @@
    "test/test-markdown"
    "test/test-focus-grid"
    "test/test-filepicker"
+   "test/test-fuzzy"
    "test/test-model"])
 
 # Install native function mocks (http, json, term, process) so that
