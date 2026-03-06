@@ -369,11 +369,14 @@
   "Convert a scrollback line into an array of visual rows.
    Each visual row is an array of {:text :style} spans that fit within width.
    Lines that exceed width wrap at word boundaries (spaces) when possible,
-   falling back to hard character breaks for long words."
+   falling back to hard character breaks for long words.
+   Continuation rows are indented by :wrap-indent spaces (auto-detected from
+   the first span of span-based lines)."
   [line width]
   (def rows @[])
   (var current-row @[])
   (var col 0)
+  (def wrap-indent (or (get line :wrap-indent) 0))
 
   (defn- flush-row []
     (when (> (length current-row) 0)
@@ -381,11 +384,20 @@
       (array/clear current-row)
       (set col 0)))
 
+  (defn- pad-continuation []
+    (when (and (> wrap-indent 0) (> (length rows) 0))
+      (for _ 0 wrap-indent
+        (array/push current-row @{:text " " :style (tui/style)}))
+      (set col wrap-indent)))
+
   (defn- word-wrap-flush []
     # Look back for the last space in current-row to break at a word boundary
     (var break-idx nil)
+    # Don't search into the indent padding on continuation rows
+    (def search-start (if (> (length rows) 0) wrap-indent 0))
     (for i 0 (length current-row)
       (def pos (- (length current-row) 1 i))
+      (when (< pos search-start) (break))
       (when (= ((get current-row pos) :text) " ")
         (set break-idx pos)
         (break)))
@@ -397,10 +409,13 @@
         (def overflow (array/slice current-row (+ break-idx 1)))
         (array/push rows keep)
         (array/clear current-row)
+        (pad-continuation)
         (array/concat current-row overflow)
-        (set col (length overflow)))
+        (set col (+ col (length overflow))))
       # No space found — hard break at width
-      (flush-row)))
+      (do
+        (flush-row)
+        (pad-continuation))))
 
   (defn- add-text-chars [text style]
     (var ci 0)
@@ -484,10 +499,12 @@
 (defn- push-line
   "Add a styled line to the scrollback. Marks widget dirty.
    When scrolled up (offset > 0), increments offset by the visual row
-   count of the new line so the visible window stays pinned."
-  [text &opt style]
+   count of the new line so the visible window stays pinned.
+   Optional wrap-indent sets the indentation for continuation rows when wrapping."
+  [text &opt style wrap-indent]
   (default style (tui/style))
   (def new-line @{:text text :style style})
+  (when wrap-indent (put new-line :wrap-indent wrap-indent))
   (array/push scrollback new-line)
   (set scrollback-dirty true)
   (when (> cached-vrows-width 0)
@@ -507,9 +524,14 @@
 
 (defn- push-raw-line
   "Add a pre-formatted line (array of spans) to the scrollback.
-   When scrolled up, increments offset by visual row count to keep the view stable."
+   When scrolled up, increments offset by visual row count to keep the view stable.
+   Auto-detects :wrap-indent from the first span's text length when there are
+   multiple spans (the first span is typically a label like '   gent: ')."
   [spans]
   (def new-line @{:spans spans})
+  # Auto-detect wrap indent: first span of multi-span lines is the label prefix
+  (when (and (> (length spans) 1) (get (first spans) :text))
+    (put new-line :wrap-indent (length ((first spans) :text))))
   (array/push scrollback new-line)
   (set scrollback-dirty true)
   (when (> cached-vrows-width 0)
@@ -649,20 +671,20 @@
     (def old-lines (string/split "\n" old-str))
     (def show-n (min (length old-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "         - " (get old-lines i "")) (colors :diff-red-fg))
+      (push-line (string "         - " (get old-lines i "")) (colors :diff-red-fg) 9)
       (put (last scrollback) :row-style :tool-row-bg))
     (when (> (length old-lines) max-diff-lines)
-      (push-line (string "         … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator))
+      (push-line (string "         … " (- (length old-lines) max-diff-lines) " more lines") (colors :separator) 9)
       (put (last scrollback) :row-style :tool-row-bg)))
 
   (when (not= "" new-str)
     (def new-lines (string/split "\n" new-str))
     (def show-n (min (length new-lines) max-diff-lines))
     (for i 0 show-n
-      (push-line (string "         + " (get new-lines i "")) (colors :diff-green-fg))
+      (push-line (string "         + " (get new-lines i "")) (colors :diff-green-fg) 9)
       (put (last scrollback) :row-style :tool-success-bg))
     (when (> (length new-lines) max-diff-lines)
-      (push-line (string "         … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator))
+      (push-line (string "         … " (- (length new-lines) max-diff-lines) " more lines") (colors :separator) 9)
       (put (last scrollback) :row-style :tool-success-bg))))
 
 (var- tool-result-max-lines 10)
@@ -678,10 +700,10 @@
   (def show-lines (min total tool-result-max-lines))
   (for i 0 show-lines
     (def line (get lines i ""))
-    (push-line (string "         " line) (colors :separator))
+    (push-line (string "         " line) (colors :separator) 9)
     (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
-    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator) 9)
     (put (last scrollback) :row-style row-bg)))
 
 # ── Pluggable tool renderers ──────────────────────────────────
@@ -792,10 +814,10 @@
   (def total (length all-lines))
   (def show-n (min total tool-result-max-lines))
   (for i 0 show-n
-    (push-line (string "         " (get all-lines i "")) (colors :separator))
+    (push-line (string "         " (get all-lines i "")) (colors :separator) 9)
     (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
-    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator))
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator) 9)
     (put (last scrollback) :row-style row-bg)))
 
 (defn output-read-file-result [result]
@@ -820,7 +842,7 @@
         @{:text (string " " code-line) :style (colors :separator)}])
     (put (last scrollback) :row-style :tool-success-bg))
   (when (> total tool-result-max-lines)
-    (push-line (string "         … " (- total tool-result-max-lines) " more lines") (colors :separator))
+    (push-line (string "         … " (- total tool-result-max-lines) " more lines") (colors :separator) 9)
     (put (last scrollback) :row-style :tool-success-bg)))
 
 (defn render-tool-call [name input]
@@ -983,7 +1005,7 @@
               (do
                 (def wrapped (word-wrap line max-width))
                 (each wl wrapped
-                  (push-line (string "         " wl))
+                  (push-line (string "         " wl) nil 9)
                   (put (last scrollback) :row-style :thinking-row-bg)))))
           nil))
       (widget/mark-dirty :chat))
