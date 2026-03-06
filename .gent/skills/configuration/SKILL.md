@@ -1,6 +1,6 @@
 ---
 name: configuration
-description: Configure and customize gent through ~/.gent/init.janet. Use when the user asks to "configure gent", "change colors", "add hooks", "customize behavior", "modify themes", "create tools", "change UI settings", "set up gent", or wants to modify gent's appearance, behavior, or functionality.
+description: Configure and customize gent through ~/.gent/init.janet and .gent/init.janet. Use when the user asks to "configure gent", "change colors", "add hooks", "customize behavior", "modify themes", "create tools", "add a tool at runtime", "register a tool", "change UI settings", "set up gent", "modify the UI", "add a widget", "create a widget", "register a widget", "add a slash command", "create a command", "change the layout", "customize the TUI", "add a keybinding", or wants to modify gent's appearance, behavior, widgets, tools, commands, or functionality at runtime.
 ---
 
 # Configuring Gent

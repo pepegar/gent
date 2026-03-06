@@ -41,6 +41,7 @@ Every widget is a Janet table with these keys:
   :rect      {:x 0 :y 0 :width 80 :height 24}  # Screen area (set by layout)
   :dirty     true                # Needs re-render?
   :focused   false               # Receives keyboard input?
+  :focusable true                # Participate in Alt+Arrow focus navigation?
   :tasks     @[]                 # Background task IDs
   :timers    @[]                 # Timer callbacks
 
@@ -292,6 +293,123 @@ After registering new widgets or changing layouts in a live session, trigger a r
 
 This is especially useful when testing widget code with `eval_janet` — you can register widgets, change layouts, and immediately see the results without restarting gent.
 
-## More Examples
+## Complete Example: File-Tree Sidebar
 
-See the main configuration guide for additional widget examples including status widgets, mini terminals, and custom layout managers.
+A full working example showing timers, focus-aware borders, scrolling, and layout integration:
+
+```janet
+(import core/widget :as widget)
+(import tui)
+(import widgets/editor :as editor)
+
+(defn create-sidebar []
+  (def state @{:files @[] :scroll 0})
+
+  # Gather files from git (or fall back to os/dir)
+  (def result (process/exec "git" ["ls-files"]))
+  (put state :files
+    (if (= 0 (result :status))
+      (filter |(not= "" $) (string/split "\n" (result :stdout)))
+      (sort (os/dir "."))))
+
+  @{:name :sidebar
+    :state state
+    :rect nil
+    :dirty true
+    :focused false
+    :focusable true
+    :tasks @[]
+    :timers @[{:interval-ms 10000
+               :callback (fn [self]
+                           # Re-scan files periodically
+                           (def r (process/exec "git" ["ls-files"]))
+                           (when (= 0 (r :status))
+                             (put (self :state) :files
+                               (filter |(not= "" $) (string/split "\n" (r :stdout)))))
+                           (put self :dirty true))}]
+
+    :render
+    (fn [self rect buf]
+      (def st (self :state))
+      (def files (st :files))
+      (def scroll (st :scroll))
+      (def w (rect :width))
+      (def h (rect :height))
+      (def x (rect :x))
+      (def y (rect :y))
+      (def border-style
+        (if (self :focused)
+          (tui/style :fg [:rgb 137 180 250] :bold true)
+          (tui/style :fg [:rgb 88 91 112])))
+      (def title-style (tui/style :fg [:rgb 166 227 161] :bold true))
+
+      # Top border
+      (tui/buffer-set-string buf x y
+        (string "┌" (string/repeat "─" (- w 2)) "┐") border-style)
+      (tui/buffer-set-string buf (+ x 1) y " Files " title-style)
+
+      # File rows
+      (def visible-h (- h 2))
+      (for row 0 visible-h
+        (def fi (+ scroll row))
+        (def cy (+ y 1 row))
+        (tui/buffer-set-string buf x cy "│" border-style)
+        (tui/buffer-set-string buf (+ x w -1) cy "│" border-style)
+        (when (< fi (length files))
+          (def file (get files fi))
+          (def inner-w (- w 3))
+          (def display
+            (if (> (length file) inner-w)
+              (string (string/slice file 0 (- inner-w 1)) "…")
+              file))
+          (tui/buffer-set-string buf (+ x 2) cy display
+            (tui/style :fg [:rgb 205 214 244]))))
+
+      # Bottom border with count
+      (def count-str (string " " (length files) " files "))
+      (tui/buffer-set-string buf x (+ y h -1)
+        (string "└" (string/repeat "─" (max 0 (- w 2 (length count-str))))
+                count-str "┘")
+        border-style))
+
+    :handle
+    (fn [self event]
+      (def st (self :state))
+      (when (= :key (event :type))
+        (def key (event :key))
+        (def file-count (length (st :files)))
+        (def visible-h (if (self :rect) (- ((self :rect) :height) 2) 20))
+        (def max-scroll (max 0 (- file-count visible-h)))
+        (cond
+          (or (= key :up) (= key "k"))
+          (do (put st :scroll (max 0 (dec (st :scroll))))
+              (put self :dirty true) nil)
+          (or (= key :down) (= key "j"))
+          (do (put st :scroll (min max-scroll (inc (st :scroll))))
+              (put self :dirty true) nil)
+          (= key :page-up)
+          (do (put st :scroll (max 0 (- (st :scroll) visible-h)))
+              (put self :dirty true) nil)
+          (= key :page-down)
+          (do (put st :scroll (min max-scroll (+ (st :scroll) visible-h)))
+              (put self :dirty true) nil)
+          nil)))})
+
+# Wire it up
+(widget/register (create-sidebar))
+(widget/set-layout-data
+  @[{:constraint :fill
+     :children [{:widget :sidebar :constraint 30}
+                {:widget :chat :constraint :fill}]}
+    {:widget :editor :constraint |(editor/get-height)}])
+(widget/mark-all-dirty)
+```
+
+## Key Points
+
+- **Alt+Arrow** moves focus between widgets. The focus graph is built automatically from widget rects.
+- **`:focusable true`** opts a widget into focus navigation. Without it, Alt+Arrow skips the widget.
+- **`:timers`** fire callbacks at intervals (e.g. to refresh file lists). The reactor calls `tick-timers` each frame.
+- **`widget/publish` / `widget/subscribe`** enable inter-widget communication if widgets need to talk to each other.
+- **`(widget/unregister :name)`** removes a widget. Reset layout with `widget/set-layout-data` afterward.
+- The default layout is stored as `:default` — restore it with `(widget/set-layout :default)`.
