@@ -19,6 +19,7 @@
 #              :source (fn [] @["a.janet" "b.janet"]))
 
 (import core/widget :as widget)
+(import core/fuzzy :as fuzzy)
 (import tui)
 
 (defn- resolve-source
@@ -49,6 +50,13 @@
   (widget/publish :file-opened
     {:path item :content (try (slurp item) ([_] nil))}))
 
+(defn- apply-filter
+  "Filter files by query using fuzzy matching. Returns filtered array."
+  [files query]
+  (if (or (nil? query) (= "" query))
+    files
+    (map |($ :item) (fuzzy/filter-sort files query))))
+
 (defn create
   "Create a configurable list picker widget.
    Options (all keyword args):
@@ -63,9 +71,11 @@
   (default source default-source)
   (default on-enter default-on-enter)
   (default refresh-ms 5000)
+  (def initial-files (resolve-source source))
   @{:name name
-    :state @{:files (resolve-source source) :selected 0 :scroll-offset 0
-             :source source :on-enter on-enter :title title}
+    :state @{:files initial-files :filtered initial-files
+             :selected 0 :scroll-offset 0
+             :query "" :source source :on-enter on-enter :title title}
     :rect nil
     :dirty true
     :focused false
@@ -75,18 +85,21 @@
                :callback (fn [self]
                            (def st (self :state))
                            (put st :files (resolve-source (st :source)))
+                           (put st :filtered (apply-filter (st :files) (st :query)))
+                           (when (>= (st :selected) (length (st :filtered)))
+                             (put st :selected (max 0 (- (length (st :filtered)) 1))))
                            (put self :dirty true))}]
 
     :handle (fn [self event]
               (def key (get event :key))
               (def st (self :state))
-              (def files (st :files))
+              (def files (st :filtered))
               (def n (length files))
-              (when (= n 0) (break nil))
 
               (cond
                 (= key :up)
                 (do
+                  (when (= n 0) (break nil))
                   (put st :selected (mod (+ (st :selected) (- n 1)) n))
                   (put self :dirty true)
                   (when (self :rect)
@@ -100,6 +113,7 @@
 
                 (= key :down)
                 (do
+                  (when (= n 0) (break nil))
                   (put st :selected (mod (+ (st :selected) 1) n))
                   (put self :dirty true)
                   (when (self :rect)
@@ -118,6 +132,35 @@
                     ((st :on-enter) selected-item))
                   nil)
 
+                (= key :escape)
+                (when (not= "" (st :query))
+                  (put st :query "")
+                  (put st :filtered (st :files))
+                  (put st :selected 0)
+                  (put st :scroll-offset 0)
+                  (put self :dirty true)
+                  nil)
+
+                (= key :backspace)
+                (when (> (length (st :query)) 0)
+                  (put st :query (string/slice (st :query) 0 (- (length (st :query)) 1)))
+                  (put st :filtered (apply-filter (st :files) (st :query)))
+                  (put st :selected 0)
+                  (put st :scroll-offset 0)
+                  (put self :dirty true)
+                  nil)
+
+                # Printable character → append to query
+                (and (string? key) (= (length key) 1)
+                     (>= (get key 0) 0x20) (<= (get key 0) 0x7E))
+                (do
+                  (put st :query (string (st :query) key))
+                  (put st :filtered (apply-filter (st :files) (st :query)))
+                  (put st :selected 0)
+                  (put st :scroll-offset 0)
+                  (put self :dirty true)
+                  nil)
+
                 # Default: unhandled
                 nil))
 
@@ -128,14 +171,18 @@
                 (if (self :focused)
                   (tui/color-indexed 75)
                   (tui/color-indexed 240)))
-              (def blk (tui/block :title (st :title) :borders :all :border-type :rounded
+              (def display-title
+                (if (= "" (st :query))
+                  (st :title)
+                  (string (st :title) " │ " (st :query))))
+              (def blk (tui/block :title display-title :borders :all :border-type :rounded
                                    :border-style (tui/style :fg border-color)
                                    :padding (tui/padding 1 1 0 0)))
               (tui/render blk rect buf)
               (def inner (tui/block-inner blk rect))
               (when (or (<= (inner :height) 0) (<= (inner :width) 0)) (break))
 
-              (def files (st :files))
+              (def files (st :filtered))
               (def selected (st :selected))
               (def scroll (st :scroll-offset))
               (def visible-h (inner :height))
