@@ -1153,6 +1153,7 @@
   (start-next-tool))
 
 (defn- enter-idle []
+  (hooks/run :turn-end)
   (set mode :idle)
   (set stream-ctx nil)
   (widget/mark-dirty :editor))

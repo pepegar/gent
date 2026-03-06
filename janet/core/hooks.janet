@@ -16,6 +16,7 @@
 #   :conversation-rollback (fn [n])                — called after rolling back n messages
 #   :session-resume    (fn [session-id])           — called after resuming a session
 #   :session-fork      (fn [old-id new-id])        — called after forking a session
+#   :turn-end          (fn [])                      — called when the agent finishes a full turn (returns to idle)
 
 (var- hooks @{})
 
