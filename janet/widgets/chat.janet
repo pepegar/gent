@@ -368,7 +368,8 @@
 (defn- line-to-visual-rows
   "Convert a scrollback line into an array of visual rows.
    Each visual row is an array of {:text :style} spans that fit within width.
-   Lines that exceed width wrap to additional rows."
+   Lines that exceed width wrap at word boundaries (spaces) when possible,
+   falling back to hard character breaks for long words."
   [line width]
   (def rows @[])
   (var current-row @[])
@@ -380,11 +381,32 @@
       (array/clear current-row)
       (set col 0)))
 
+  (defn- word-wrap-flush []
+    # Look back for the last space in current-row to break at a word boundary
+    (var break-idx nil)
+    (for i 0 (length current-row)
+      (def pos (- (length current-row) 1 i))
+      (when (= ((get current-row pos) :text) " ")
+        (set break-idx pos)
+        (break)))
+    (if (and break-idx (> break-idx 0))
+      (do
+        # Split: everything up to and including the space goes on this row,
+        # everything after wraps to the next row
+        (def keep (array/slice current-row 0 (+ break-idx 1)))
+        (def overflow (array/slice current-row (+ break-idx 1)))
+        (array/push rows keep)
+        (array/clear current-row)
+        (array/concat current-row overflow)
+        (set col (length overflow)))
+      # No space found — hard break at width
+      (flush-row)))
+
   (defn- add-text-chars [text style]
     (var ci 0)
     (while (< ci (length text))
       (when (>= col width)
-        (flush-row))
+        (word-wrap-flush))
       (def byte (get text ci))
       # Handle newlines explicitly - they should force a row break
       (if (= byte (chr "\n"))

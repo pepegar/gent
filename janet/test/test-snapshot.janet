@@ -168,6 +168,31 @@
                                                      (def non-empty (filter |(not= "" $) rows))
                                                      (t/assert-truthy (> (length non-empty) 1))))
 
+(t/test "snapshot: word wrap breaks at spaces not mid-word" (fn []
+                                                              (def w (setup 30 10))
+  # "abcdef ghijkl" with prefix "         " (9 chars) = 23 chars per line avail
+  # At width 29 (gutter takes 1), the first line is "   gent: abcdefghij klmnopqrs"
+  # which is 29 chars. Next word won't fit → wrap at last space.
+                                                              (chat/output-agent "one two three four five six seven eight nine ten eleven twelve")
+                                                              (def rows (render-chat w 30 10))
+                                                              (def non-empty (filter |(not= "" $) rows))
+  # Check that no visible word is split across rows
+  # (each row's trimmed text should not end mid-word, i.e. next row shouldn't
+  # start with letters that continue the previous row's last word)
+                                                              (t/assert-truthy (>= (length non-empty) 2))
+                                                              (var prev-ends-letter false)
+                                                              (each row non-empty
+                                                                (def trimmed (string/trim row))
+                                                                (when (> (length trimmed) 0)
+                                                                  (def first-ch (get trimmed 0))
+                                                                  (def starts-letter (and (>= first-ch (chr "a")) (<= first-ch (chr "z"))))
+  # If previous row ended with a letter and this row starts with a letter,
+  # the word was split (bad!)
+                                                                  (when prev-ends-letter
+                                                                    (t/assert-falsy starts-letter))
+                                                                  (def last-ch (get trimmed (- (length trimmed) 1)))
+                                                                  (set prev-ends-letter (and (>= last-ch (chr "a")) (<= last-ch (chr "z"))))))))
+
 # ── Edit file rendering snapshot ─────────────────────────────
 
 (t/test "snapshot: edit_file shows diff" (fn []
