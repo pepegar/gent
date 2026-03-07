@@ -1236,51 +1236,66 @@
 
 (set start-next-tool
   (fn []
-    (var keep-going true)
-    (while keep-going
-      (set keep-going false)
-      (def idx (tool-exec :current-idx))
-      (when (abort/aborted?)
-        (spinner-stop)
-        (output-info "— remaining tools skipped —")
-        
-        # Check if we have incomplete tool calls that would cause API errors
-        (def tool-calls (tool-exec :tool-calls))
-        (def completed-tools (tool-exec :results))
-        (def has-incomplete (and (not (empty? tool-calls)) 
-                                (< (length completed-tools) (length tool-calls))))
-        
-        (if has-incomplete
-          # Don't push incomplete assistant message - just handle steering
-          (when (not (empty? steering-queue))
-            (process-steering-or-idle))
-          # All tools completed - safe to push results and stream
-          (do
-            (push-tool-results-and-stream)
-            (when (= mode :idle) (break))
-            (when (not (empty? steering-queue))
-              (process-steering-or-idle))))
-        (break))
+    (def idx (tool-exec :current-idx))
+    (when (abort/aborted?)
+      (spinner-stop)
+      (output-info "— remaining tools skipped —")
 
-      (if (>= idx (length (tool-exec :tool-calls)))
-        (push-tool-results-and-stream)
+      # Check if we have incomplete tool calls that would cause API errors
+      (def tool-calls (tool-exec :tool-calls))
+      (def completed-tools (tool-exec :results))
+      (def has-incomplete (and (not (empty? tool-calls))
+                              (< (length completed-tools) (length tool-calls))))
+
+      (if has-incomplete
+        # Don't push incomplete assistant message - just handle steering
+        (when (not (empty? steering-queue))
+          (process-steering-or-idle))
+        # All tools completed - safe to push results and stream
         (do
-          (def tc (get (tool-exec :tool-calls) idx))
-          (def name (tc :name))
-          (def input (tc :input))
-          (spinner-start (string "running " name "…"))
-          (def hook-handled (hooks/run :render-tool-call name input))
-          (unless hook-handled (render-tool-call name input))
-          (def result (tools/dispatch name input))
-          (if (tools/async? result)
-            (put tool-exec :async-handle result)
-            (do
-              (spinner-stop)
-              (def result-hook-handled (hooks/run :render-tool-result name result))
-              (unless result-hook-handled (render-tool-result name result))
-              (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
-              (put tool-exec :current-idx (+ idx 1))
-              (set keep-going true))))))))
+          (push-tool-results-and-stream)
+          (when (= mode :idle) (break))
+          (when (not (empty? steering-queue))
+            (process-steering-or-idle))))
+      (break))
+
+    (if (>= idx (length (tool-exec :tool-calls)))
+      (push-tool-results-and-stream)
+      (do
+        (def tc (get (tool-exec :tool-calls) idx))
+        (def name (tc :name))
+        (def input (tc :input))
+        (spinner-start (string "running " name "…"))
+        (def hook-handled (hooks/run :render-tool-call name input))
+        (unless hook-handled (render-tool-call name input))
+        # All tools go through the async path. Dispatch is deferred to the
+        # first poll so the event loop can render the spinner before execution.
+        # Phase: :pending → :dispatching → :delegating (for native async tools)
+        (var phase :pending)
+        (var inner-handle nil)
+        (put tool-exec :async-handle
+          (tools/async-tool
+            (fn []
+              (case phase
+                # First poll: yield nil so the spinner gets at least one tick
+                :pending (do (set phase :dispatching) nil)
+                # Second poll: actually dispatch the tool
+                :dispatching
+                (do
+                  (def result (tools/dispatch name input))
+                  (if (tools/async? result)
+                    # Tool is natively async (bash, prompt_user) — delegate
+                    (do (set inner-handle result)
+                        (set phase :delegating)
+                        ((inner-handle :poll)))
+                    # Sync tool finished — return result
+                    [:done result]))
+                # Subsequent polls: delegate to the native async handle
+                :delegating
+                (when inner-handle ((inner-handle :poll)))))
+            (fn []
+              (when inner-handle
+                ((inner-handle :cancel))))))))))
 
 (defn- handle-stream-done []
   (profile/end stream-span-id)
