@@ -352,13 +352,29 @@
 
     # Status provider for editor border title
     (editor/set-status-provider
-      (fn []
+      (fn [&opt max-w]
+        (default max-w 999)
         (def focused-w (widget/focused))
         (def focus-name (if focused-w (string (get focused-w :name)) "none"))
-        (string "focus: " focus-name
-                " │ " (conv/length) " msgs"
-                " ≈ " (conv/estimate-tokens) " tokens"
-                " │ " (conv/get-session-id))))
+        (def sid (conv/get-session-id))
+        (def msgs (conv/length))
+        (def tokens (conv/estimate-tokens))
+        # Progressive disclosure: full → medium → short → minimal
+        (def full (string "focus: " focus-name
+                          " │ " msgs " msgs"
+                          " ≈ " tokens " tokens"
+                          " │ " sid))
+        (if (<= (tui/string-width full) max-w)
+          full
+          (do
+            (def medium (string focus-name " │ " msgs " msgs ≈ " tokens "t"))
+            (if (<= (tui/string-width medium) max-w)
+              medium
+              (do
+                (def short (string msgs " msgs ≈ " tokens "t"))
+                (if (<= (tui/string-width short) max-w)
+                  short
+                  (string tokens "t"))))))))
 
     # Hook: mark editor dirty on conversation changes (updates title)
     (hooks/add :after-message (fn [_] (widget/mark-dirty :editor)))

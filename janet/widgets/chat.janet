@@ -372,14 +372,71 @@
 # ── Visual row expansion ──────────────────────────────────────
 # These must be defined before push-line (which uses count-visual-rows).
 
+(defn- line-has-box-drawing?
+  "Check if a line contains box-drawing characters (table borders).
+   Box-drawing chars: │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ─"
+  [line]
+  (def texts
+    (if (line :spans)
+      (map |($ :text) (line :spans))
+      @[(or (line :text) "")]))
+  (var found false)
+  (each text texts
+    (when (not found)
+      (each ch ["│" "┌" "┐" "└" "┘" "├" "┤" "┬" "┴" "┼" "─"]
+        (when (and (not found) (string/find ch text))
+          (set found true)))))
+  found)
+
+(defn- truncate-line-to-width
+  "Truncate a line's spans to fit within width columns, appending ellipsis if truncated.
+   Returns a single visual row (array of {:text :style} spans)."
+  [line width]
+  (def row @[])
+  (var col 0)
+  (def all-spans
+    (if (line :spans)
+      (line :spans)
+      @[@{:text (or (line :text) "") :style (or (line :style) (tui/style))}]))
+  (var truncated false)
+  (each span all-spans
+    (when (not truncated)
+      (def text (span :text))
+      (def st (or (span :style) (tui/style)))
+      (var ci 0)
+      (while (and (< ci (length text)) (not truncated))
+        (def byte (get text ci))
+        (def char-len
+          (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+        (def cend (min (+ ci char-len) (length text)))
+        (def ch (string/slice text ci cend))
+        (def w (tui/char-width ch))
+        (when (> w 0)
+          (if (> (+ col w 1) width)
+            (do
+              # Not enough room for this char + ellipsis; truncate here
+              (array/push row @{:text "\xE2\x80\xA6" :style st})
+              (set truncated true))
+            (do
+              (array/push row @{:text ch :style st})
+              (+= col w))))
+        (set ci cend))))
+  (if (= 0 (length row)) @[] @[row]))
+
 (defn- line-to-visual-rows
   "Convert a scrollback line into an array of visual rows.
    Each visual row is an array of {:text :style} spans that fit within width.
    Lines that exceed width wrap at word boundaries (spaces) when possible,
    falling back to hard character breaks for long words.
+   Table lines (containing box-drawing characters) are truncated with ellipsis
+   instead of wrapped to preserve table structure.
    Continuation rows are indented by :wrap-indent spaces (auto-detected from
    the first span of span-based lines)."
   [line width]
+  # Table lines: truncate instead of wrapping to preserve table structure
+  (when (line-has-box-drawing? line)
+    (break (truncate-line-to-width line width)))
+
   (def rows @[])
   (var current-row @[])
   (var col 0)
@@ -1607,6 +1664,9 @@
           (tui/buffer-set-char buf (+ col 1) y "" (cell :style))))
       (+= col (if (> w 0) w 1)))
     (when rs
+      (def bg-style (colors rs))
+      (when bg-style
+        (tui/buffer-set-style buf (tui/rect (rect :x) y width 1) bg-style))
       (def gutter-color
         (cond
           (= rs :user-row-bg) (colors :user-label)
@@ -1621,6 +1681,8 @@
     # Render just below the scrollback content (in the reserved area)
     (def partial-y (+ (rect :y) y-offset visible-count))
     (when (< partial-y (+ (rect :y) height))
+      (when-let [bg (colors :agent-row-bg)]
+        (tui/buffer-set-style buf (tui/rect (rect :x) partial-y width 1) bg))
       (tui/buffer-set-char buf (rect :x) partial-y "▐" (colors :agent-label))
       (if (stream-state :first)
         (do
@@ -1720,6 +1782,18 @@
                    (def page-size (max 1 (- height 2)))
                    (set scroll-offset (max 0 (- scroll-offset page-size)))
                    (widget/mark-dirty :chat)
+                   (break nil))
+
+                 (or (= key :end) (= key "G"))
+                 (do
+                   (set scroll-offset 0)
+                   (widget/mark-dirty :chat)
+                   (break nil))
+
+                 (= key :home)
+                 (do
+                   (set scroll-offset (max 0 (- (total-visual-rows width) height)))
+                   (widget/mark-dirty :chat)
                    (break nil))))
 
              (cond
@@ -1775,4 +1849,26 @@
              (def inner (tui/block-inner blk rect))
              (put self :content-rect inner)
              (when (and (> (inner :height) 0) (> (inner :width) 0))
-               (render-scrollback inner buf)))})
+               (render-scrollback inner buf)
+               # Scrollbar and indicator when scrolled up
+               (when (> scroll-offset 0)
+                 (def total-vrows (total-visual-rows (inner :width)))
+                 (def max-off (max 1 (- total-vrows (inner :height))))
+                 (def track-height (inner :height))
+                 (def thumb-size (max 1 (math/floor (* track-height (/ (inner :height) (max 1 total-vrows))))))
+                 (def thumb-pos (math/floor (* (- track-height thumb-size) (/ (- max-off scroll-offset) (max 1 max-off)))))
+                 (def right-col (- (+ (rect :x) (rect :width)) 1))
+                 (def track-y (+ (rect :y) 1))
+                 (def scroll-style (tui/style :fg (tui/color-indexed 240)))
+                 (def thumb-style (tui/style :fg (tui/color-indexed 75)))
+                 (for i 0 track-height
+                   (def y (+ track-y i))
+                   (if (and (>= i thumb-pos) (< i (+ thumb-pos thumb-size)))
+                     (tui/buffer-set-char buf right-col y "\xE2\x96\x88" thumb-style)
+                     (tui/buffer-set-char buf right-col y "\xE2\x96\x91" scroll-style)))
+                 # "N below" indicator on bottom border
+                 (def indicator (string/format " %d below " scroll-offset))
+                 (def ind-width (tui/string-width indicator))
+                 (def ix (- (+ (rect :x) (rect :width)) ind-width 1))
+                 (def iy (- (+ (rect :y) (rect :height)) 1))
+                 (tui/buffer-set-string buf ix iy indicator (tui/style :fg (tui/color-indexed 75))))))})

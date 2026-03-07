@@ -15,6 +15,7 @@
 (use ./rect)
 (use ./style)
 (use ./buffer)
+(use ./charwidth)
 
 # ── Padding ────────────────────────────────────────────────────
 
@@ -86,6 +87,25 @@
     (keyword? borders) (= borders side)
     (indexed? borders) (some |(= $ side) borders)
     false))
+
+# ── UTF-8-aware truncation ────────────────────────────────────
+
+(defn- truncate-to-width [text max-w]
+  "Truncate text to fit within max-w display columns, respecting UTF-8."
+  (var col 0)
+  (var i 0)
+  (def len (length text))
+  (while (< i len)
+    (def b0 (get text i))
+    (def char-len
+      (cond (< b0 0x80) 1 (< b0 0xE0) 2 (< b0 0xF0) 3 4))
+    (def end (min (+ i char-len) len))
+    (def ch (string/slice text i end))
+    (def w (char-width ch))
+    (when (> (+ col w) max-w) (break))
+    (+= col w)
+    (set i end))
+  (string/slice text 0 i))
 
 # ── Block construction ─────────────────────────────────────────
 
@@ -171,7 +191,7 @@
           # Render " Title " with spacing
           (def display (string " " title " "))
           (buffer-set-string buf tx ty
-            (string/slice display 0 (min (length display) max-w))
+            (truncate-to-width display max-w)
             tst)))))
   opts)
 

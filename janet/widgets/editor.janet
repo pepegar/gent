@@ -550,7 +550,8 @@
                (if is-focused
                  (tui/color-indexed 75)
                  (tui/color-indexed 240)))
-             (def title-text (when status-fn (try (status-fn) ([_] nil))))
+             (def max-title-w (- (rect :width) 4))
+             (def title-text (when status-fn (try (status-fn max-title-w) ([_] nil))))
              (def blk (tui/block :title (or title-text "")
                                   :borders :all :border-type :rounded
                                   :border-style (tui/style :fg border-color)
