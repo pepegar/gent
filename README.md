@@ -1,70 +1,55 @@
 # gent
 
-> *Think Emacs, but for AI-assisted coding.*
+**The programmable coding agent.**
 
-An extensible coding agent built as a lisp machine.
+gent is an open source AI coding agent with a scripting engine at its core. It runs in your terminal, works with the model and endpoint you choose, and gives you something most agents do not: a real programming language for changing how the agent behaves while it is running.
 
-gent is a terminal-based AI coding agent where the entire runtime — the agent loop, tools, UI, and configuration — is written in [Janet](https://janet-lang.org/), a small Lisp. Rust provides only the low-level "syscalls" (terminal I/O, HTTP, process execution, JSON), and from there Janet owns everything. Think Emacs, but for AI-assisted coding.
+Other agents give you config files. gent gives you a programmable runtime.
+
+## Quick start
+
+```sh
+cargo build --release
+./target/release/gent
+```
+
+You are in a terminal session with an AI coding agent. Ask it to read files, write code, and run tests. Then ask it to:
+
+> Make a tool that runs my test suite and summarizes failures.
+
+gent will not just run the tests. It can create a reusable tool for that workflow, live, in the same conversation.
+
+## The idea
+
+Most coding agents are fixed products. You can adjust settings, but you cannot really change how they think, act, or present themselves.
+
+gent takes a different approach. The agent loop, tools, hooks, slash commands, UI, and conversation management are all part of a runtime you can inspect and modify. The LLM has access to that runtime too, which means it can build tools, wire up hooks, add commands, and query its own state as part of solving a task.
+
+This is not a plugin API bolted onto the side. The runtime itself is programmable.
 
 ## Architecture
 
+A thin Rust layer provides low-level primitives: terminal I/O, HTTP, process execution, and JSON. Everything above that is written in [Janet](https://janet-lang.org/), a lightweight embeddable language shipped inside the binary.
+
 ```
-┌─────────────────────────────────────────────────┐
-│                  Janet Runtime                  │
-│                                                 │
-│  boot.janet ─→ core modules ─→ agent loop       │
-│                                                 │
-│  ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
-│  │   Tools   │ │   Hooks   │ │ Conversation  │  │
-│  │  registry │ │  system   │ │  persistence  │  │
-│  └───────────┘ └───────────┘ └───────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
-│  │  Skills   │ │ Registers │ │   Commands    │  │
-│  │ discovery │ │  storage  │ │   (slash)     │  │
-│  └───────────┘ └───────────┘ └───────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
-│  │  Buffers  │ │ AGENTS.md │ │      UI       │  │
-│  │  (editor) │ │ discovery │ │   (TUI)       │  │
-│  └───────────┘ └───────────┘ └───────────────┘  │
-├─────────────────────────────────────────────────┤
-│           Rust Native Functions                 │
-│  term/  ·  http/  ·  process/  ·  json/         │
-└─────────────────────────────────────────────────┘
++--------------------------------------------------+
+|              Programmable Runtime                 |
+|                                                  |
+|  Agent loop · Tools · Hooks · UI · Sessions      |
+|  Commands · Skills · Registers · Buffers         |
+|                                                  |
+|  All written in Janet. All modifiable at runtime.|
++--------------------------------------------------+
+|                Rust Primitives                    |
+|  term/  ·  http/  ·  process/  ·  json/          |
++--------------------------------------------------+
 ```
 
-Rust boots a Janet VM, registers four native modules, and runs `boot.janet`. From that point, Janet handles everything: loading core modules, discovering skills and `AGENTS.md` files, loading user/project config, and entering the agent loop.
+## What "programmable" means in practice
 
-## Features
+### Define tools at runtime
 
-- **Runtime-extensible tools** — The LLM can create new tools on the fly by evaluating Janet code. Users can register tools from config files too.
-- **Hooks system** — Emacs-style hooks (`:before-tool-call`, `:after-response`, `:on-error`, etc.) let you intercept and transform every part of the agent's behavior.
-- **Skills** — Discoverable skill modules following the [agentskills.io](https://agentskills.io) spec. Skills provide domain-specific instructions that are loaded on demand.
-- **AGENTS.md** — Walks up from `cwd` to `/` collecting `AGENTS.md` files for project-specific context, injected into the system prompt.
-- **Session persistence** — Conversations are append-only logs of Janet s-expressions, crash-safe and inspectable. Fork, resume, and rollback sessions.
-- **Slash commands** — Built-in commands (`/help`, `/session`, `/fork`, `/rollback`, `/clear`, `/tokens`, etc.) with an extensible command registry.
-- **Buffers** — Emacs-inspired buffer abstraction for composable text editing with dirty tracking and hooks integration.
-- **Registers** — Named key-value storage slots that persist across the session.
-- **Streaming** — Non-blocking SSE streaming with concurrent terminal input handling.
-- **Configurable** — `~/.gent/init.janet` (user config) and `.gent/init.janet` (project config), just like `~/.emacs` and `.dir-locals.el`.
-
-## Built-in Tools
-
-| Tool | Description |
-|------|-------------|
-| `bash` | Execute shell commands |
-| `read_file` | Read file contents |
-| `list_files` | List files and directories (respects `.gitignore`) |
-| `edit_file` | Make targeted edits to text files |
-| `eval_janet` | Evaluate Janet code in the running agent |
-| `use_skill` | Activate a skill for specialized instructions |
-
-## eval_janet — the Self-Modification Primitive
-
-This is what makes gent a lisp machine. The LLM has full access to the running Janet VM and can reprogram itself mid-conversation. This isn't a toy — the entire agent (tools, hooks, commands, UI, conversation) is Janet data that `eval_janet` can read and write.
-
-### Create tools on the fly
-
-Ask gent to "make a tool that searches my codebase with ripgrep" and it will:
+Ask gent to make a ripgrep tool and it can write one live:
 
 ```janet
 (import core/tools :as tools)
@@ -82,11 +67,11 @@ Ask gent to "make a tool that searches my codebase with ripgrep" and it will:
                  (string "No matches.")))})
 ```
 
-The tool is immediately available — gent will use it in the same conversation.
+No restart. The tool is available immediately in the same conversation.
 
-### Hook its own behavior
+### Intercept behavior with hooks
 
-Ask gent to "log every tool call to a file" and it wires itself up:
+Log every tool call:
 
 ```janet
 (import core/hooks :as hooks)
@@ -98,7 +83,7 @@ Ask gent to "log every tool call to a file" and it wires itself up:
           :a)))
 ```
 
-Or "refuse to edit anything in vendor/":
+Block edits to protected paths:
 
 ```janet
 (hooks/add :before-tool-call
@@ -108,9 +93,7 @@ Or "refuse to edit anything in vendor/":
       (error "Refusing to edit vendor/ files"))))
 ```
 
-### Introspect its own state
-
-Ask "how big is our conversation?" or "what tools do you have?" and gent inspects itself:
+### Query the agent's own state
 
 ```janet
 (import core/conversation :as conv)
@@ -122,9 +105,7 @@ Ask "how big is our conversation?" or "what tools do you have?" and gent inspect
 # => @["bash" "read_file" "list_files" "edit_file" "eval_janet" "use_skill" "rg"]
 ```
 
-### Register slash commands
-
-Ask gent to "add a /todo command" and it creates a persistent task list:
+### Extend the command system
 
 ```janet
 (import core/commands :as commands)
@@ -144,35 +125,49 @@ Ask gent to "add a /todo command" and it creates a persistent task list:
                      (string "Added: " args))))})
 ```
 
-### Tune the UI
+## Features
 
-```janet
-(import core/ui :as ui)
-(ui/set-tool-result-max-lines 50)  # show more output
-```
+- **Programmable tools** — Create, replace, or extend tools at runtime. The LLM can build its own tools mid-conversation.
+- **Event hooks** — Intercept tool calls, responses, and errors with hooks like `:before-tool-call`, `:after-response`, and `:on-error`.
+- **Skills** — Domain-specific instruction modules following the [agentskills.io](https://agentskills.io) spec and loaded on demand.
+- **AGENTS.md** — Project-specific context collected by walking up from the current working directory.
+- **Crash-safe sessions** — Append-only s-expression logs you can resume, fork, and roll back.
+- **Extensible commands** — Built-in slash commands plus your own runtime-defined commands.
+- **Buffers and registers** — Composable text editing and persistent named storage within a session.
+- **Non-blocking streaming** — SSE streaming with concurrent terminal input.
+- **Open model routing** — Point gent at a local proxy or hosted API and choose the model yourself.
 
-### The key insight
+## Built-in tools
 
-In most agents, the LLM is a passenger — it can call tools but can't change the vehicle. In gent, `eval_janet` means the LLM is the mechanic too. It can build new tools, rewire hooks, add commands, change the UI — all without restarting. This is the Emacs philosophy applied to AI agents.
+| Tool | Description |
+|------|-------------|
+| `bash` | Execute shell commands |
+| `read_file` | Read file contents |
+| `list_files` | List files and directories (respects `.gitignore`) |
+| `edit_file` | Make targeted edits to text files |
+| `eval_janet` | Evaluate code in the running agent |
+| `use_skill` | Activate a skill for specialized instructions |
+
+`eval_janet` is the key primitive. It gives both the user and the LLM access to the live runtime: tools, hooks, commands, UI, and conversation state.
 
 ## Configuration
 
-gent loads config from two places, in order:
+Config files are scripts that run at startup:
 
-1. **`~/.gent/init.janet`** — User config (like `~/.emacs`)
-2. **`.gent/init.janet`** — Project config (like `.dir-locals.el`)
+1. **`~/.gent/init.janet`** — Personal setup
+2. **`.gent/init.janet`** — Project-specific setup
 
 ```janet
-# Point at a LiteLLM proxy
+# Choose your endpoint and model
 (import core/api :as api)
 (api/set-url "http://localhost:4000/v1/messages")
 (api/set-model "anthropic/claude-sonnet-4-20250514")
 
-# Change the system prompt
+# Shape the agent
 (import core/agent :as agent)
 (agent/set-system-prompt "You are a Haskell expert...")
 
-# Define a custom tool
+# Define tools
 (import core/tools :as tools)
 (tools/register "grep"
   {:description "Search for a pattern in files"
@@ -185,64 +180,51 @@ gent loads config from two places, in order:
                  (get result :stdout)
                  "No matches."))})
 
-# Add hooks
+# Observe the pipeline
 (import core/hooks :as hooks)
 (hooks/add :before-tool-call (fn [name input] (print "calling tool:" name)))
-(hooks/add :after-tool-call (fn [name input result] (printf "tool %s done" name)))
 ```
+
+Because config is just code, anything the agent can do, your config can do too.
 
 ## Skills
 
-Skills are directories containing a `SKILL.md` file with YAML frontmatter. They're discovered from:
+Skills are directories containing a `SKILL.md` file with YAML frontmatter. They are discovered from:
 
-- `.gent/skills/` (walking up from cwd to `/`)
-- `.agents/skills/` (walking up from cwd to `/`)
-- `GENT_SKILLS_PATH` environment variable (colon-separated)
+- `.gent/skills/` walking up from `cwd` to `/`
+- `.agents/skills/` walking up from `cwd` to `/`
+- `GENT_SKILLS_PATH` as a colon-separated list
 
-Skills use progressive disclosure: only the name and description are loaded at startup (~100 tokens). The full instructions are loaded only when the LLM activates the skill via the `use_skill` tool.
+Only the name and description are loaded at startup. Full instructions load on demand when the LLM activates the skill.
 
 ## Sessions
 
 Conversations are persisted as append-only logs at:
 
-```
+```text
 ~/.gent/sessions/<url-encoded-cwd>/<session-id>/history
 ```
 
-Each message is a Janet s-expression, one per line — crash-safe, human-readable, and `cat`-friendly. Use slash commands to manage sessions:
+Each message is a structured s-expression, one per line. The format is crash-safe, human-readable, and easy to inspect.
 
-- `/sessions` — List all sessions for the current project
-- `/resume <id>` — Resume a previous session
-- `/fork` — Fork the current session into a new one
-- `/unfork` — Return to the parent session
-- `/rollback <n>` — Remove the last n messages
+- `/sessions` — List sessions
+- `/resume <id>` — Resume a session
+- `/fork` / `/unfork` — Branch and return
+- `/rollback <n>` — Remove the last `n` messages
 
 ## Usage
 
 ```sh
-# Start interactive session
-gent
-
-# Show help
-gent --help
-
-# Show version
-gent --version
-
-# Load a custom setup script
-gent -l setup.janet
-
-# Start without loading config files
-gent -q
-
-# Run in headless mode (for programmatic use)
-gent --headless
-
-# Custom port for RPC server
-gent --port 8080
+gent                    # Start interactive session
+gent --help             # Show help
+gent --version          # Show version
+gent -l setup.janet     # Load a custom script
+gent -q                 # Skip config files
+gent --headless         # Programmatic mode
+gent --port 8080        # Custom RPC port
 ```
 
-Once running, use slash commands like `/help`, `/skills`, `/tools`, `/session`, `/quit`.
+Once running, use slash commands like `/help`, `/skills`, `/tools`, `/session`, and `/quit`.
 
 ## Building
 
@@ -255,11 +237,10 @@ cargo build --release
 ## Dependencies
 
 - **[Janet](https://janet-lang.org/)** — Embedded via [janetrs](https://crates.io/crates/janetrs)
-- **[ureq](https://crates.io/crates/ureq)** — HTTP client for API calls
+- **[ureq](https://crates.io/crates/ureq)** — HTTP client
 - **[crossterm](https://crates.io/crates/crossterm)** — Terminal handling
 - **[serde_json](https://crates.io/crates/serde_json)** — JSON serialization
 
 ## License
 
 MIT
-
