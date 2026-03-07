@@ -1664,9 +1664,6 @@
           (tui/buffer-set-char buf (+ col 1) y "" (cell :style))))
       (+= col (if (> w 0) w 1)))
     (when rs
-      (def bg-style (colors rs))
-      (when bg-style
-        (tui/buffer-set-style buf (tui/rect (rect :x) y width 1) bg-style))
       (def gutter-color
         (cond
           (= rs :user-row-bg) (colors :user-label)
@@ -1681,8 +1678,6 @@
     # Render just below the scrollback content (in the reserved area)
     (def partial-y (+ (rect :y) y-offset visible-count))
     (when (< partial-y (+ (rect :y) height))
-      (when-let [bg (colors :agent-row-bg)]
-        (tui/buffer-set-style buf (tui/rect (rect :x) partial-y width 1) bg))
       (tui/buffer-set-char buf (rect :x) partial-y "▐" (colors :agent-label))
       (if (stream-state :first)
         (do
