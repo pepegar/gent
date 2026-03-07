@@ -124,14 +124,33 @@
   (def raw-cells (string/split "|" inner))
   (map string/trim raw-cells))
 
+(defn- strip-inline-markers [text]
+  "Return the display length of text after stripping inline markdown markers (*, **, ***)."
+  (var display-len 0)
+  (var pos 0)
+  (def len (length text))
+  (while (< pos len)
+    (if (= (get text pos) (chr "*"))
+      (do
+        (var star-count 0)
+        (while (and (< (+ pos star-count) len)
+                    (= (get text (+ pos star-count)) (chr "*")))
+          (++ star-count))
+        (set pos (+ pos star-count)))
+      (do
+        (++ display-len)
+        (++ pos))))
+  display-len)
+
 (defn- compute-col-widths [rows]
-  "Compute the max width per column across all rows."
+  "Compute the max width per column across all rows.
+   Uses display width (stripping inline markdown markers) for accurate alignment."
   (def ncols (length (first rows)))
   (def widths (array/new ncols))
   (for c 0 ncols (array/push widths 0))
   (each row rows
     (for c 0 (min ncols (length row))
-      (def w (length (get row c)))
+      (def w (strip-inline-markers (get row c)))
       (when (> w (get widths c))
         (put widths c w))))
   widths)
@@ -149,9 +168,13 @@
   (def border-style (styles :list-marker))
   (array/push spans (span "│" border-style))
   (for c 0 (length cells)
-    (def cell-text (pad-right (get cells c) (get widths c)))
+    (def cell-text (get cells c))
+    (def display-width (strip-inline-markers cell-text))
+    (def pad-amount (- (get widths c) display-width))
     (array/push spans (span " " style-default))
     (array/concat spans (parse-inline-spans cell-text cell-style))
+    (when (> pad-amount 0)
+      (array/push spans (span (string/repeat " " pad-amount) style-default)))
     (array/push spans (span " " style-default))
     (array/push spans (span "│" border-style)))
   (line ;spans))

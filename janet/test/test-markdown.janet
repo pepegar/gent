@@ -5,6 +5,7 @@
 # Set up module path for relative imports
 (array/push module/paths ["./:all:.janet" :source])
 (import tui/markdown :as md)
+(import tui/text :as text)
 
 (defn test-basic-parsing []
   (def sample "# Hello World\nThis is regular text.")
@@ -294,6 +295,18 @@
   (def top-text (string ;(map |($ :text) (get output 0))))
   (t/assert-truthy (string/find "┌" top-text)))
 
+(defn test-table-inline-bold-column-alignment []
+  (def sample "| Tool | Purpose |\n|------|------|\n| **bash** | Execute shell commands |\n| **read_file** | Read file contents |")
+  (def lines (md/markdown->lines sample))
+  # top border, header, mid border, 2 data rows, bottom border = 6
+  (t/assert= 6 (length lines))
+  # All rendered lines must have the same visual (display) width so borders align.
+  # Use line-width which counts display columns, not byte length.
+  (def widths (map |(text/line-width $) lines))
+  (def first-width (get widths 0))
+  (each w widths
+    (t/assert= first-width w)))
+
 (defn test-table-ansi-output []
   (def sample "| A | B |\n|---|---|\n| 1 | 2 |")
   (def ansi (md/markdown->ansi sample))
@@ -326,4 +339,5 @@
 (t/test "table at end of text" test-table-at-end-of-text)
 (t/test "table streaming" test-table-streaming)
 (t/test "table streaming at finish" test-table-streaming-at-finish)
+(t/test "table inline bold column alignment" test-table-inline-bold-column-alignment)
 (t/test "table ansi output" test-table-ansi-output)
