@@ -218,6 +218,13 @@
 (var- scrollback-dirty true)
 (var- prev-y-offset -1)
 
+# ── Bash progress (live output) ────────────────────────────────
+# When a bash command is running and emitting :partial output, we show
+# the last N lines in a small live-updating block in the scrollback.
+# Lines are tagged {:progress true} so we can find and replace them.
+
+(var- progress-max-lines 5)
+
 (defn reset-state
   "Reset chat state for testing. Clears scrollback, resets mode to idle."
   []
@@ -847,6 +854,59 @@
     (push-line (string "         … " (- total tool-result-max-lines) " more lines") (colors :separator) 9)
     (put (last scrollback) :row-style :tool-success-bg)))
 
+# ── Live bash progress ─────────────────────────────────────────
+
+(defn- remove-progress-lines
+  "Remove all scrollback lines tagged {:progress true}."
+  []
+  (var i (- (length scrollback) 1))
+  (var removed 0)
+  (while (>= i 0)
+    (when (get (get scrollback i) :progress)
+      (when (> cached-vrows-width 0)
+        (def line (get scrollback i))
+        (def ew (effective-width line cached-vrows-width))
+        (set cached-total-vrows (- cached-total-vrows (count-visual-rows line ew))))
+      (array/remove scrollback i)
+      (++ removed))
+    (-- i))
+  (when (> removed 0)
+    (set scrollback-dirty true)
+    (widget/mark-dirty :chat))
+  removed)
+
+(defn- push-progress-line
+  "Add a progress line to the scrollback (tagged for later removal)."
+  [text style]
+  (def new-line @{:text text :style style :progress true :row-style :tool-row-bg})
+  (array/push scrollback new-line)
+  (set scrollback-dirty true)
+  (when (> cached-vrows-width 0)
+    (def ew (effective-width new-line cached-vrows-width))
+    (set cached-total-vrows (+ cached-total-vrows (count-visual-rows new-line ew))))
+  (widget/mark-dirty :chat))
+
+(defn update-bash-progress
+  "Show the last N lines of partial bash output as a live progress block."
+  [partial-output]
+  (remove-progress-lines)
+  (def all-lines (string/split "\n" partial-output))
+  # Remove trailing empty lines
+  (while (and (> (length all-lines) 0) (= "" (last all-lines)))
+    (array/pop all-lines))
+  (def total (length all-lines))
+  (when (= total 0) (break))
+  (def show-start (max 0 (- total progress-max-lines)))
+  (def sep-style (colors :separator))
+  # Header line showing progress
+  (def header
+    (if (> total progress-max-lines)
+      (string "         ┄ " total " lines (" (- total progress-max-lines) " hidden) ┄")
+      (string "         ┄ output ┄")))
+  (push-progress-line header sep-style)
+  (for i show-start total
+    (push-progress-line (string "         " (get all-lines i "")) sep-style)))
+
 (defn render-tool-call [name input]
   (when (> (length scrollback) 0) (push-line ""))
   (def custom (get tool-renderers name))
@@ -1190,6 +1250,8 @@
   (def idx (tool-exec :current-idx))
   (def tc (get (tool-exec :tool-calls) idx))
   (hooks/run :after-tool-call (tc :name) (tc :input) result)
+  # Remove live progress lines before rendering the final result
+  (remove-progress-lines)
   (spinner-stop)
   (def result-hook-handled (hooks/run :render-tool-result (tc :name) result))
   (unless result-hook-handled (render-tool-result (tc :name) result))
@@ -1238,6 +1300,7 @@
   (fn []
     (def idx (tool-exec :current-idx))
     (when (abort/aborted?)
+      (remove-progress-lines)
       (spinner-stop)
       (output-info "— remaining tools skipped —")
 
@@ -1402,6 +1465,7 @@
       (when (tool-exec :async-handle)
         ((get (tool-exec :async-handle) :cancel))
         (put tool-exec :async-handle nil))
+      (remove-progress-lines)
       (spinner-stop)
       (output-info "— tools cancelled —")
       (array/clear steering-queue)
@@ -1438,18 +1502,24 @@
           (= event-type :done) (finish-current-async-tool event-data)
           (= event-type :partial)
           (do
-            # Update spinner with partial output preview
+            # Show live progress for bash tools, spinner preview for others
             (def idx (tool-exec :current-idx))
             (def tc (get (tool-exec :tool-calls) idx))
-            (def preview (string/slice event-data 0 (min 50 (length event-data))))
-            (def truncated (if (> (length event-data) 50) "…" ""))
-            (spinner-start (string "running " (tc :name) ": " preview truncated)))
+            (if (= "bash" (tc :name))
+              (do
+                (update-bash-progress event-data)
+                (put spinner-state :message (string "running bash…")))
+              (do
+                (def preview (string/slice event-data 0 (min 50 (length event-data))))
+                (def truncated (if (> (length event-data) 50) "…" ""))
+                (spinner-start (string "running " (tc :name) ": " preview truncated)))))
           (= event-type :error)
           (do
             (def idx (tool-exec :current-idx))
             (def tc (get (tool-exec :tool-calls) idx))
             (def result (string "Error: " event-data))
             (hooks/run :after-tool-call (tc :name) (tc :input) result)
+            (remove-progress-lines)
             (spinner-stop)
             (output-tool-result result false)
             (array/push (tool-exec :results) (tool-result-msg (tc :id) result))
