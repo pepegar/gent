@@ -39,6 +39,7 @@
 (use ./block)
 (use ./layout)
 (use ./widget)
+(use ./ansi)
 
 # Re-export: (use ...) marks bindings as :private, so undo that
 # for all non-internal symbols so (import tui) works.

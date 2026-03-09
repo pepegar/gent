@@ -18,6 +18,7 @@
 (import core/widget :as widget)
 (import tui)
 (import tui/markdown :as md)
+(import tui/ansi :as ansi)
 (import core/profile :as profile)
 
 (var- stream-span-id nil)
@@ -646,6 +647,30 @@
                   (set start chunk-end))))))
       result)))
 
+(defn- has-ansi?
+  "Check if a string contains ANSI escape sequences."
+  [text]
+  (truthy? (string/find "\x1b[" text)))
+
+(defn- push-ansi-line
+  "Push a line that may contain ANSI escape codes.
+   If ANSI codes are found, parses them into styled spans and uses push-raw-line.
+   Otherwise falls back to push-line with the given style.
+   The prefix is prepended to the line text before parsing."
+  [text base-style wrap-indent]
+  (if (has-ansi? text)
+    (do
+      (def spans (ansi/ansi->spans text base-style))
+      # Filter out empty spans
+      (def filtered (filter |(not= "" ($ :text)) spans))
+      (if (> (length filtered) 0)
+        (do
+          (def line @{:spans (array ;filtered) :wrap-indent wrap-indent})
+          (push-raw-line (line :spans))
+          (put (last scrollback) :wrap-indent wrap-indent))
+        (push-line text base-style wrap-indent)))
+    (push-line text base-style wrap-indent)))
+
 # ── Formatted output ──────────────────────────────────────────
 
 (defn output
@@ -766,7 +791,8 @@
   (def show-lines (min total tool-result-max-lines))
   (for i 0 show-lines
     (def line (get lines i ""))
-    (push-line (string "         " line) (colors :separator) 9)
+    (def line-text (string "         " line))
+    (push-ansi-line line-text (colors :separator) 9)
     (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
     (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator) 9)
@@ -880,7 +906,8 @@
   (def total (length all-lines))
   (def show-n (min total tool-result-max-lines))
   (for i 0 show-n
-    (push-line (string "         " (get all-lines i "")) (colors :separator) 9)
+    (def line-text (string "         " (get all-lines i "")))
+    (push-ansi-line line-text (colors :separator) 9)
     (put (last scrollback) :row-style row-bg))
   (when (> total tool-result-max-lines)
     (push-line (string "         … " (- total tool-result-max-lines) " more lines omitted") (colors :separator) 9)
@@ -933,9 +960,18 @@
   removed)
 
 (defn- push-progress-line
-  "Add a progress line to the scrollback (tagged for later removal)."
+  "Add a progress line to the scrollback (tagged for later removal).
+   Supports both plain text (with a style) and ANSI-styled spans."
   [text style]
-  (def new-line @{:text text :style style :progress true :row-style :tool-row-bg})
+  (def new-line
+    (if (has-ansi? text)
+      (do
+        (def spans (ansi/ansi->spans text style))
+        (def filtered (filter |(not= "" ($ :text)) spans))
+        (if (> (length filtered) 0)
+          @{:spans (array ;filtered) :progress true :row-style :tool-row-bg :wrap-indent 9}
+          @{:text text :style style :progress true :row-style :tool-row-bg}))
+      @{:text text :style style :progress true :row-style :tool-row-bg}))
   (array/push scrollback new-line)
   (set scrollback-dirty true)
   (when (> cached-vrows-width 0)
