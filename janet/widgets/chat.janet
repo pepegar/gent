@@ -1022,6 +1022,8 @@
     (cond
       (= "bash" name) (output-bash-result (string result))
       (= "read_file" name) (output-read-file-result result)
+      # edit_file: the diff display already shows what happened; suppress "OK"
+      (and (= "edit_file" name) (= "OK" (string result))) nil
       (do
         (def text (if (or (table? result) (array? result) (tuple? result))
                     (string "[Image: " (get-in result [:source :media_type] "unknown") "]")
