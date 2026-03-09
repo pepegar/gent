@@ -209,16 +209,16 @@
                                                                       :options [{:label "A"} {:label "B"} {:label "C"}]})
                                                         (def area (tui/rect 0 0 80 24))
                                                         (def result (dialog/render-overlay area))
-  # height = content_rows(3) + 5 = 8
-                                                        (t/assert= (result :height) 8)))
+  # height = top(1) + title(1) + sep(1) + pad(1) + content(3) + pad(1) + hint(1) + bottom(1) = 10
+                                                        (t/assert= (result :height) 10)))
 
 (t/test "render-overlay has correct height for input" (fn []
                                                        (dialog/reset-state)
                                                        (dialog/show {:type :input :title "Q"})
                                                        (def area (tui/rect 0 0 80 24))
                                                        (def result (dialog/render-overlay area))
-  # height = content_rows(1) + 5 = 6
-                                                       (t/assert= (result :height) 6)))
+  # height = top(1) + title(1) + sep(1) + pad(1) + content(1) + pad(1) + hint(1) + bottom(1) = 8
+                                                       (t/assert= (result :height) 8)))
 
 (t/test "render-overlay corners are rounded" (fn []
                                               (dialog/reset-state)
@@ -230,6 +230,52 @@
                                               (t/assert= (tl :ch) "╭")
                                               (def last-cell (get cells (- (length cells) 1)))
                                               (t/assert= (last-cell :ch) "╯")))
+
+(t/test "render-overlay title is inside body not in border" (fn []
+                                                             (dialog/reset-state)
+                                                             (dialog/show {:type :select :title "Pick a color"
+                                                                           :options [{:label "Red"}]})
+                                                             (def area (tui/rect 0 0 80 24))
+                                                             (def result (dialog/render-overlay area))
+                                                             (def cells (result :cells))
+                                                             # Top border should be plain ─ (no title chars)
+                                                             # cell 0 = ╭, cell 1..N-1 = ─, cell N = ╮
+                                                             (def second-cell (get cells 1))
+                                                             (t/assert= (second-cell :ch) "─")
+                                                             # Title text should appear in body rows (y > popup-y)
+                                                             (var found-title false)
+                                                             (each c cells
+                                                               (when (and (= (c :ch) "P")
+                                                                          (> (c :y) (result :y)))
+                                                                 (set found-title true)))
+                                                             (t/assert-truthy found-title)))
+
+(t/test "render-overlay has separator between title and content" (fn []
+                                                                  (dialog/reset-state)
+                                                                  (dialog/show {:type :select :title "Q"
+                                                                                :options [{:label "A"}]})
+                                                                  (def area (tui/rect 0 0 80 24))
+                                                                  (def result (dialog/render-overlay area))
+                                                                  (def cells (result :cells))
+                                                                  # Find the separator row: should have ├ and ┤
+                                                                  (var found-left false)
+                                                                  (var found-right false)
+                                                                  (each c cells
+                                                                    (when (= (c :ch) "├") (set found-left true))
+                                                                    (when (= (c :ch) "┤") (set found-right true)))
+                                                                  (t/assert-truthy found-left)
+                                                                  (t/assert-truthy found-right)))
+
+(t/test "render-overlay long title wraps to multiple lines" (fn []
+                                                             (dialog/reset-state)
+                                                             (def long-title "This is a very long dialog title that should wrap across multiple lines inside the popup")
+                                                             (dialog/show {:type :select :title long-title
+                                                                           :options [{:label "OK"}]})
+                                                             (def area (tui/rect 0 0 80 24))
+                                                             (def result (dialog/render-overlay area))
+                                                             # With max-dialog-width=60, inner-width=58
+                                                             # The title should wrap to 2 lines, making height = 1+2+1+1+1+1+1+1 = 9
+                                                             (t/assert= (result :height) 9)))
 
 # ── Dismiss is idempotent ────────────────────────────────────
 

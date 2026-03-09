@@ -172,6 +172,37 @@
 
 # ── Overlay rendering helpers ────────────────────────────────
 
+(defn- wrap-title
+  "Word-wrap the title to fit within max-width columns, with 2-space left padding.
+   Returns an array of strings ready for rendering."
+  [text max-width]
+  (def usable (- max-width 2))  # 2-space left padding
+  (when (<= usable 1) (break @[(string "  " (string/slice text 0 (max 1 max-width)))]))
+  (def result @[])
+  (def words (string/split " " text))
+  (var line @"  ")  # start with padding
+  (var col 0)
+  (each word words
+    (def wlen (length word))
+    (if (= col 0)
+      (do
+        (buffer/push line word)
+        (set col wlen))
+      (if (<= (+ col 1 wlen) usable)
+        (do
+          (buffer/push line " " word)
+          (set col (+ col 1 wlen)))
+        (do
+          (array/push result (string line))
+          (set line @"  ")
+          (buffer/push line word)
+          (set col wlen)))))
+  (when (> (length line) 2)
+    (array/push result (string line)))
+  (when (empty? result)
+    (array/push result "  "))
+  result)
+
 (defn- emit-content-row
   "Emit a content row with border chars on left and right."
   [cells popup-x popup-width inner-width border-style y text style]
@@ -198,6 +229,14 @@
     (++ col))
   (array/push cells {:x (+ popup-x popup-width -1) :y y :ch "│" :style border-style}))
 
+(defn- emit-separator-row
+  "Emit a horizontal separator row: ├──────┤"
+  [cells popup-x popup-width border-style y]
+  (array/push cells {:x popup-x :y y :ch "├" :style border-style})
+  (for col 1 (- popup-width 1)
+    (array/push cells {:x (+ popup-x col) :y y :ch "─" :style border-style}))
+  (array/push cells {:x (+ popup-x popup-width -1) :y y :ch "┤" :style border-style}))
+
 # ── Overlay rendering ────────────────────────────────────────
 
 (defn render-overlay
@@ -217,13 +256,17 @@
   (def inner-width (- popup-width 2))
   (when (<= inner-width 0) (break nil))
 
+  # Word-wrap title into lines that fit inside the popup
+  (def title-lines (wrap-title title inner-width))
+  (def title-row-count (length title-lines))
+
   (def content-rows
     (case dialog-type
       :input 1
       (min (length options) max-visible-options)))
 
-  # top-border + padding + content + padding + hint + bottom-border
-  (def popup-height (+ content-rows 5))
+  # top-border + title-rows + separator + padding + content + padding + hint + bottom-border
+  (def popup-height (+ 1 title-row-count 1 1 content-rows 1 1 1))
 
   (def popup-x (math/floor (/ (- (screen-area :width) popup-width) 2)))
   (def popup-y (math/floor (/ (- (screen-area :height) popup-height) 2)))
@@ -231,35 +274,27 @@
 
   (def cells @[])
 
-  # ── Top border with title ──
+  # ── Top border (plain, no title) ──
   (array/push cells {:x popup-x :y popup-y :ch "╭" :style border-style})
-  (array/push cells {:x (+ popup-x 1) :y popup-y :ch "─" :style border-style})
-  (def title-display (string " " title " "))
-  # Walk title by UTF-8 codepoints
-  (var tcol 0)
-  (var ti 0)
-  (def tlen (length title-display))
-  (def max-title-cols (- inner-width 1))
-  (while (and (< tcol max-title-cols) (< ti tlen))
-    (def byte (get title-display ti))
-    (def char-len
-      (cond
-        (< byte 0x80) 1
-        (< byte 0xE0) 2
-        (< byte 0xF0) 3
-        4))
-    (def ch (string/slice title-display ti (min (+ ti char-len) tlen)))
-    (array/push cells {:x (+ popup-x 2 tcol) :y popup-y
-                        :ch ch :style title-style})
-    (+= ti char-len)
-    (++ tcol))
-  (for col (+ 2 tcol) (- popup-width 1)
+  (for col 1 (- popup-width 1)
     (array/push cells {:x (+ popup-x col) :y popup-y :ch "─" :style border-style}))
   (array/push cells {:x (+ popup-x popup-width -1) :y popup-y :ch "╮" :style border-style})
 
+  # ── Title rows (inside the body) ──
+  (var y-cursor (+ popup-y 1))
+  (each tl title-lines
+    (emit-content-row cells popup-x popup-width inner-width border-style
+      y-cursor tl title-style)
+    (++ y-cursor))
+
+  # ── Separator between title and content ──
+  (emit-separator-row cells popup-x popup-width border-style y-cursor)
+  (++ y-cursor)
+
   # ── Padding row ──
   (emit-content-row cells popup-x popup-width inner-width border-style
-    (+ popup-y 1) "" normal-style)
+    y-cursor "" normal-style)
+  (++ y-cursor)
 
   # ── Content rows ──
   (case dialog-type
@@ -267,7 +302,8 @@
     (do
       (def display (string "  > " input-text))
       (emit-content-row cells popup-x popup-width inner-width border-style
-        (+ popup-y 2) display normal-style))
+        y-cursor display normal-style)
+      (++ y-cursor))
 
     (do
       (def start-idx scroll-offset)
@@ -282,12 +318,14 @@
                        (string/slice text 0 inner-width)
                        text))
         (emit-content-row cells popup-x popup-width inner-width border-style
-          (+ popup-y 2 row) trimmed
-          (if is-sel selected-style normal-style)))))
+          (+ y-cursor row) trimmed
+          (if is-sel selected-style normal-style)))
+      (+= y-cursor content-rows)))
 
   # ── Padding row ──
   (emit-content-row cells popup-x popup-width inner-width border-style
-    (+ popup-y 2 content-rows) "" normal-style)
+    y-cursor "" normal-style)
+  (++ y-cursor)
 
   # ── Hint row ──
   (def hint
@@ -298,14 +336,14 @@
                       (string/slice hint 0 inner-width)
                       hint))
   (emit-content-row cells popup-x popup-width inner-width border-style
-    (+ popup-y 3 content-rows) trimmed-hint hint-style)
+    y-cursor trimmed-hint hint-style)
+  (++ y-cursor)
 
   # ── Bottom border ──
-  (def bottom-y (+ popup-y 4 content-rows))
-  (array/push cells {:x popup-x :y bottom-y :ch "╰" :style border-style})
+  (array/push cells {:x popup-x :y y-cursor :ch "╰" :style border-style})
   (for col 1 (- popup-width 1)
-    (array/push cells {:x (+ popup-x col) :y bottom-y :ch "─" :style border-style}))
-  (array/push cells {:x (+ popup-x popup-width -1) :y bottom-y :ch "╯" :style border-style})
+    (array/push cells {:x (+ popup-x col) :y y-cursor :ch "─" :style border-style}))
+  (array/push cells {:x (+ popup-x popup-width -1) :y y-cursor :ch "╯" :style border-style})
 
   {:cells cells
    :width popup-width
