@@ -718,6 +718,17 @@
   ((parser :finish))
   (push-line ""))
 
+(defn output-skills [skill-list]
+  "Render a formatted skills listing into the scrollback."
+  (def sorted (sort-by |($ :name) skill-list))
+  (push-line (string "  " (length sorted) " skills:") (tui/style) 2)
+  (push-line "")
+  (each s sorted
+    (push-raw-line
+      @[@{:text "         " :style (tui/style)}
+        @{:text (s :name) :style (tui/style :bold true)}
+        @{:text (string " — " (s :description)) :style (tui/style)}])))
+
 (defn output-tool [name &opt detail]
   (push-raw-line
     @[@{:text (string "   ▸ " name) :style (colors :tool-label)}

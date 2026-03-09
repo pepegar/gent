@@ -378,3 +378,43 @@
 (t/test "table backtick code column alignment" test-table-backtick-code-alignment)
 (t/test "table unicode width alignment" test-table-unicode-width-alignment)
 (t/test "inline code span" test-inline-code-span)
+
+# ── Link tests ────────────────────────────────────────────────
+
+(defn test-inline-link []
+  (def lines (md/markdown->lines "Check [example](https://example.com) here"))
+  (t/assert= (length lines) 1)
+  (def spans ((first lines) :spans))
+  # Should have: "Check " link("example") " here"
+  (t/assert-truthy (>= (length spans) 3))
+  (var found-link false)
+  (each s spans
+    (when (and (= (s :text) "example")
+               (get (s :style) :link))
+      (set found-link true)
+      (t/assert= (get (s :style) :link) "https://example.com")
+      (t/assert-truthy (get (s :style) :underline))))
+  (t/assert-truthy found-link))
+
+(defn test-inline-link-no-url []
+  # [text] without (url) should not be a link
+  (def lines (md/markdown->lines "See [text] here"))
+  (t/assert= (length lines) 1)
+  (def spans ((first lines) :spans))
+  (each s spans
+    (t/assert-falsy (get (s :style) :link))))
+
+(defn test-inline-link-with-bold []
+  (def lines (md/markdown->lines "Try **[bold link](https://example.com)**"))
+  (t/assert= (length lines) 1)
+  (def spans ((first lines) :spans))
+  (var found-link false)
+  (each s spans
+    (when (get (s :style) :link)
+      (set found-link true)
+      (t/assert= (s :text) "bold link")))
+  (t/assert-truthy found-link))
+
+(t/test "inline link" test-inline-link)
+(t/test "inline link no url" test-inline-link-no-url)
+(t/test "inline link with bold" test-inline-link-with-bold)

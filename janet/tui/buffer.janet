@@ -179,11 +179,13 @@
   "Compare two buffers cell-by-cell. Returns an ANSI string that updates
    only the changed cells. Both buffers must cover the same area.
    Handles wide characters: skips continuation cells (empty ch) and
-   accounts for wide chars advancing the cursor by 2."
+   accounts for wide chars advancing the cursor by 2.
+   Emits OSC 8 hyperlink sequences for cells with :link in their style."
   [old-buf new-buf]
   (def a (new-buf :area))
   (def parts @[])
   (var cur-style nil)
+  (var cur-link nil)
 
   (for row 0 (a :height)
     (var expected-col nil)
@@ -204,6 +206,10 @@
                        (style= (old-cell :style) (new-cell :style)))
             # Cell changed — emit cursor move if not at expected position
             (when (or (nil? expected-col) (not= col expected-col))
+              # Close any open link before jumping cursor
+              (when cur-link
+                (array/push parts osc8-close)
+                (set cur-link nil))
               (array/push parts
                 (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1))))
             (def st (new-cell :style))
@@ -212,6 +218,12 @@
               (def sgr (style->sgr st))
               (when (not= sgr "") (array/push parts sgr))
               (set cur-style st))
+            # Handle link transitions
+            (def new-link (get st :link))
+            (when (not= cur-link new-link)
+              (when cur-link (array/push parts osc8-close))
+              (when new-link (array/push parts (osc8-open new-link)))
+              (set cur-link new-link))
             (array/push parts ch)
             # Wide chars advance cursor by 2
             (def w (char-width ch))
@@ -219,6 +231,7 @@
           (def w (char-width ch))
           (set col (+ col (if (> w 0) w 1)))))))
 
+  (when cur-link (array/push parts osc8-close))
   (when (not (empty? parts))
     (array/push parts "\x1b[0m"))
   (string ;parts))
@@ -228,13 +241,19 @@
 (defn buffer->str
   "Convert the entire buffer to an ANSI escape-coded string.
    Moves the cursor to each row and emits style changes as needed.
-   Handles wide characters: skips continuation cells."
+   Handles wide characters: skips continuation cells.
+   Emits OSC 8 hyperlink sequences for cells with :link in their style."
   [buf]
   (def parts @[])
   (def a (buf :area))
   (var cur-style nil)
+  (var cur-link nil)
 
   (for row 0 (a :height)
+    # Close any open link before moving cursor to new row
+    (when cur-link
+      (array/push parts osc8-close)
+      (set cur-link nil))
     # Move cursor to start of row (ANSI is 1-indexed)
     (array/push parts
       (string/format "\x1b[%d;%dH" (+ (a :y) row 1) (+ (a :x) 1)))
@@ -252,17 +271,25 @@
             (def sgr (style->sgr st))
             (when (not= sgr "") (array/push parts sgr))
             (set cur-style st))
+          # Handle link transitions
+          (def new-link (get st :link))
+          (when (not= cur-link new-link)
+            (when cur-link (array/push parts osc8-close))
+            (when new-link (array/push parts (osc8-open new-link)))
+            (set cur-link new-link))
           (array/push parts ch)
           (def w (char-width ch))
           (set col (+ col (if (> w 0) w 1)))))))
 
+  (when cur-link (array/push parts osc8-close))
   (array/push parts "\x1b[0m")
   (string ;parts))
 
 (defn buffer->rows
   "Convert the buffer to an array of ANSI-styled row strings (no cursor movement).
    Each element is one row, ready to be printed line-by-line.
-   Handles wide characters: skips continuation cells."
+   Handles wide characters: skips continuation cells.
+   Emits OSC 8 hyperlink sequences for cells with :link in their style."
   [buf]
   (def a (buf :area))
   (def rows @[])
@@ -270,6 +297,7 @@
   (for row 0 (a :height)
     (def parts @[])
     (var cur-style nil)
+    (var cur-link nil)
     (var col 0)
     (while (< col (a :width))
       (def c (buffer-get buf (+ (a :x) col) (+ (a :y) row)))
@@ -284,9 +312,16 @@
             (def sgr (style->sgr st))
             (when (not= sgr "") (array/push parts sgr))
             (set cur-style st))
+          # Handle link transitions
+          (def new-link (get st :link))
+          (when (not= cur-link new-link)
+            (when cur-link (array/push parts osc8-close))
+            (when new-link (array/push parts (osc8-open new-link)))
+            (set cur-link new-link))
           (array/push parts ch)
           (def w (char-width ch))
           (set col (+ col (if (> w 0) w 1))))))
+    (when cur-link (array/push parts osc8-close))
     (array/push parts "\x1b[0m")
     (array/push rows (string ;parts)))
 

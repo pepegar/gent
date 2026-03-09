@@ -39,9 +39,11 @@
     base-style))
 
 (defn- parse-inline-spans [text base-style]
-  "Parse inline markdown (bold, italic, code) and return an array of spans.
-   Handles **bold**, *italic*, ***bold+italic***, and `code`."
-  (if (and (not (string/find "*" text)) (not (string/find "`" text)))
+  "Parse inline markdown (bold, italic, code, links) and return an array of spans.
+   Handles **bold**, *italic*, ***bold+italic***, `code`, and [text](url)."
+  (if (and (not (string/find "*" text))
+           (not (string/find "`" text))
+           (not (string/find "[" text)))
     @[(span text base-style)]
     (do
       (def result @[])
@@ -54,6 +56,36 @@
       (while (< pos len)
         (def ch (get text pos))
         (cond
+          # Markdown link: [text](url)
+          (= ch (chr "["))
+          (do
+            # Look for closing ] then (url)
+            (def close-bracket (string/find "]" text (+ pos 1)))
+            (if (and close-bracket
+                     (< (+ close-bracket 1) len)
+                     (= (get text (+ close-bracket 1)) (chr "(")))
+              (do
+                (def close-paren (string/find ")" text (+ close-bracket 2)))
+                (if close-paren
+                  (do
+                    # Flush current buffer
+                    (when (> (length buf) 0)
+                      (array/push result (span (string buf) (compute-inline-style bold italic base-style)))
+                      (buffer/clear buf))
+                    (def link-text (string/slice text (+ pos 1) close-bracket))
+                    (def link-url (string/slice text (+ close-bracket 2) close-paren))
+                    (def link-style (style-merge (styles :link) (style :link link-url)))
+                    (array/push result (span link-text link-style))
+                    (set pos (+ close-paren 1)))
+                  (do
+                    # No closing paren — treat as literal
+                    (buffer/push buf ch)
+                    (++ pos))))
+              (do
+                # No matching ]( — treat as literal
+                (buffer/push buf ch)
+                (++ pos))))
+
           # Backtick code span
           (= ch (chr "`"))
           (do
@@ -172,7 +204,7 @@
   (map string/trim raw-cells))
 
 (defn- strip-inline-markers [text]
-  "Return the display width of text after stripping inline markdown markers (*, `, **)."
+  "Return the display width of text after stripping inline markdown markers (*, `, **, [text](url))."
   (var display-width 0)
   (var pos 0)
   (def len (length text))
@@ -189,6 +221,29 @@
       (do
         (while (and (< pos len) (= (get text pos) (chr "`")))
           (++ pos)))
+      # Markdown link [text](url) — count only the text part
+      (= ch (chr "["))
+      (do
+        (def close-bracket (string/find "]" text (+ pos 1)))
+        (if (and close-bracket
+                 (< (+ close-bracket 1) len)
+                 (= (get text (+ close-bracket 1)) (chr "(")))
+          (do
+            (def close-paren (string/find ")" text (+ close-bracket 2)))
+            (if close-paren
+              (do
+                # Count display width of link text only
+                (def link-text (string/slice text (+ pos 1) close-bracket))
+                (+= display-width (string-width link-text))
+                (set pos (+ close-paren 1)))
+              (do
+                # No closing paren — count [ as literal
+                (++ display-width)
+                (++ pos))))
+          (do
+            # No ]( — count [ as literal
+            (++ display-width)
+            (++ pos))))
       # Count display width of regular characters (UTF-8 aware)
       (do
         (def byte (get text pos))

@@ -118,10 +118,22 @@
       (style->sgr-raw s))))
 
 (defn style=
-  "Fast style equality. Compares precomputed SGR strings first."
+  "Fast style equality. Compares precomputed SGR strings and :link."
   [a b]
   (cond
     (and (nil? a) (nil? b)) true
     (or (nil? a) (nil? b)) false
-    (= (get a :_sgr) (get b :_sgr)) true
+    (and (= (get a :_sgr) (get b :_sgr))
+         (= (get a :link) (get b :link))) true
     false))
+
+# ── OSC 8 hyperlink helpers ───────────────────────────────────
+
+(def osc8-close
+  "OSC 8 close sequence (BEL terminator)."
+  "\x1b]8;;\x07")
+
+(defn osc8-open
+  "OSC 8 open sequence for a URL (BEL terminator)."
+  [url]
+  (string "\x1b]8;;" url "\x07"))

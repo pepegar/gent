@@ -4,6 +4,7 @@
 (import core/skills :as skills)
 (import core/api :as api)
 (import core/conversation :as conv)
+(import widgets/chat :as chat)
 
 (commands/register "tools"
   {:description "List registered tools"
@@ -38,14 +39,12 @@
   {:description "List discovered skills"
    :usage "/skills"
    :function (fn [args]
-              (def skill-list (skills/list-skills))
-              (if (empty? skill-list)
-                "No skills discovered."
-                (do
-                  (def lines @[(string (length skill-list) " skills:")])
-                  (each s (sort-by |($ :name) skill-list)
-                    (array/push lines (string "  " (s :name) " — " (s :description))))
-                  (string/join lines "\n"))))})
+               (def skill-list (skills/list-skills))
+               (if (empty? skill-list)
+                 "No skills discovered."
+                 (do
+                   (chat/output-skills skill-list)
+                   "")))})
 
 (commands/register "skill"
   {:description "Activate a skill (e.g. /skill:pdf)"

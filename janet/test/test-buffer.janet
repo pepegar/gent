@@ -180,5 +180,41 @@
                                                  (t/assert= (get rows 0) "AB")
                                                  (t/assert= (get rows 1) "C")))
 
+# ── OSC 8 hyperlink rendering ──────────────────────────────────
+
+(t/test "buffer->str emits OSC 8 for linked cells" (fn []
+                                                     (def buf (buffer (rect 0 0 10 1)))
+                                                     (def link-style (style :fg :blue :underline true :link "https://example.com"))
+                                                     (buffer-set-string buf 0 0 "Click" link-style)
+                                                     (def result (buffer->str buf))
+                                                     # Should contain OSC 8 open and close
+                                                     (t/assert-truthy (string/find "\x1b]8;;https://example.com\x07" result))
+                                                     (t/assert-truthy (string/find "\x1b]8;;\x07" result))
+                                                     (t/assert-truthy (string/find "Click" result))))
+
+(t/test "buffer->str no OSC 8 for cells without link" (fn []
+                                                        (def buf (buffer (rect 0 0 10 1)))
+                                                        (buffer-set-string buf 0 0 "Hello" (style :fg :blue))
+                                                        (def result (buffer->str buf))
+                                                        (t/assert-falsy (string/find "\x1b]8;;" result))))
+
+(t/test "buffer-diff emits OSC 8 for changed linked cells" (fn []
+                                                             (def a (buffer (rect 0 0 10 1)))
+                                                             (def b (buffer (rect 0 0 10 1)))
+                                                             (def link-style (style :fg :blue :link "https://test.com"))
+                                                             (buffer-set-string b 0 0 "Link" link-style)
+                                                             (def diff (buffer-diff a b))
+                                                             (t/assert-truthy (string/find "\x1b]8;;https://test.com\x07" diff))
+                                                             (t/assert-truthy (string/find "\x1b]8;;\x07" diff))))
+
+(t/test "style= considers link field" (fn []
+                                        (def s1 (style :fg :blue :link "https://a.com"))
+                                        (def s2 (style :fg :blue :link "https://b.com"))
+                                        (def s3 (style :fg :blue :link "https://a.com"))
+                                        (def s4 (style :fg :blue))
+                                        (t/assert-falsy (style= s1 s2))
+                                        (t/assert-truthy (style= s1 s3))
+                                        (t/assert-falsy (style= s1 s4))))
+
 (def pass (t/pass))
 (def fail (t/fail))
