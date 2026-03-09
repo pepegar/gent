@@ -101,6 +101,25 @@
                                                        (t/assert-truthy (string/find "user:" bottom))
                                                        (t/assert-truthy (string/find "hello agent" bottom))))
 
+(t/test "snapshot: multi-line user message shows all lines" (fn []
+                                                             (def w (setup))
+                                                             (chat/output-user "first line\nsecond line\nthird line")
+                                                             (def rows (render-chat w))
+  # All three lines should appear in the rendered output
+                                                             (def text (string/join rows "\n"))
+                                                             (t/assert-truthy (string/find "user:" text))
+                                                             (t/assert-truthy (string/find "first line" text))
+                                                             (t/assert-truthy (string/find "second line" text))
+                                                             (t/assert-truthy (string/find "third line" text))
+  # Lines should be on separate rows
+                                                             (var user-row nil)
+                                                             (for i 0 (length rows)
+                                                               (when (string/find "first line" (get rows i))
+                                                                 (set user-row i)))
+                                                             (t/assert-truthy user-row)
+                                                             (t/assert-truthy (string/find "second line" (get rows (+ user-row 1))))
+                                                             (t/assert-truthy (string/find "third line" (get rows (+ user-row 2))))))
+
 (t/test "snapshot: error message shows label" (fn []
                                                (def w (setup))
                                                (chat/output-error "something failed")
@@ -419,6 +438,23 @@
                                                     (def cell-end (content-cell buf 39 9))
                                                     (t/assert= (cell-start :ch) "▐")
                                                     (t/assert-truthy (not= (cell-end :ch) "▐"))))
+
+(t/test "snapshot: multi-line user message has gutter on all lines" (fn []
+                                                                     (def w (setup))
+                                                                     (chat/output-user "line A\nline B")
+                                                                     (def rows (render-chat w))
+  # Find the rows
+                                                                     (var line-a-row nil)
+                                                                     (for i 0 (length rows)
+                                                                       (when (string/find "line A" (get rows i))
+                                                                         (set line-a-row i)))
+                                                                     (t/assert-truthy line-a-row)
+  # Check the gutter bar on both rows
+                                                                     (def buf (render-buf w))
+                                                                     (def cell-a (content-cell buf 0 line-a-row))
+                                                                     (def cell-b (content-cell buf 0 (+ line-a-row 1)))
+                                                                     (t/assert= (cell-a :ch) "▐")
+                                                                     (t/assert= (cell-b :ch) "▐")))
 
 (t/test "snapshot: set-colors overrides a color" (fn []
                                                   (def w (setup))

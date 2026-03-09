@@ -66,6 +66,29 @@
                                     (t/assert-truthy (string/find "user:" ((first (line :spans)) :text)))
                                     (t/assert-truthy (string/find "hi there" ((last (line :spans)) :text)))))
 
+(t/test "output-user multi-line preserves newlines" (fn []
+                                                     (setup)
+                                                     (chat/output-user "line one\nline two\nline three")
+                                                     (def sb (chat/get-scrollback))
+  # Should produce 3 scrollback entries (one per line)
+                                                     (t/assert= (length sb) 3)
+  # First line has the user: label
+                                                     (t/assert-truthy (string/find "user:" ((first ((get sb 0) :spans)) :text)))
+                                                     (t/assert= ((last ((get sb 0) :spans)) :text) "line one")
+  # Continuation lines have indent, not label
+                                                     (t/assert= ((first ((get sb 1) :spans)) :text) "         ")
+                                                     (t/assert= ((last ((get sb 1) :spans)) :text) "line two")
+                                                     (t/assert= ((last ((get sb 2) :spans)) :text) "line three")))
+
+(t/test "output-user preserves empty lines in message" (fn []
+                                                        (setup)
+                                                        (chat/output-user "hello\n\nworld")
+                                                        (def sb (chat/get-scrollback))
+                                                        (t/assert= (length sb) 3)
+                                                        (t/assert= ((last ((get sb 0) :spans)) :text) "hello")
+                                                        (t/assert= ((last ((get sb 1) :spans)) :text) "")
+                                                        (t/assert= ((last ((get sb 2) :spans)) :text) "world")))
+
 (t/test "output-error pushes error spans" (fn []
                                            (setup)
                                            (chat/output-error "something broke")
