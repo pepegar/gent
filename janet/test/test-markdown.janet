@@ -315,6 +315,40 @@
   (t/assert-truthy (string/find "1" ansi))
   (t/assert-truthy (string/find "2" ansi)))
 
+(defn test-table-backtick-code-alignment []
+  (def sample "| Name | Symbol |\n|------|--------|\n| gutter | `▐` |\n| check | `✓` |")
+  (def lines (md/markdown->lines sample))
+  (t/assert= 6 (length lines))
+  # All rendered lines must have the same visual width so borders align
+  (def widths (map |(text/line-width $) lines))
+  (def first-width (get widths 0))
+  (each w widths
+    (t/assert= first-width w)))
+
+(defn test-table-unicode-width-alignment []
+  (def sample "| Test | What it verifies |\n|------|------------------|\n| `output-user` | Each `\\n` creates entries |\n| `snapshot: multi-line` | All lines render on separate rows |")
+  (def lines (md/markdown->lines sample))
+  (t/assert= 6 (length lines))
+  (def widths (map |(text/line-width $) lines))
+  (def first-width (get widths 0))
+  (each w widths
+    (t/assert= first-width w)))
+
+(defn test-inline-code-span []
+  (def lines (md/markdown->lines "Use `foo` and `bar` here"))
+  (t/assert= 1 (length lines))
+  (def spans ((first lines) :spans))
+  # Should have: "Use " code("foo") " and " code("bar") " here"
+  (t/assert-truthy (>= (length spans) 5))
+  # Find the code spans
+  (var found-foo false)
+  (var found-bar false)
+  (each s spans
+    (when (= (s :text) "foo") (set found-foo true))
+    (when (= (s :text) "bar") (set found-bar true)))
+  (t/assert-truthy found-foo)
+  (t/assert-truthy found-bar))
+
 # Run tests
 (t/test "basic parsing" test-basic-parsing)
 (t/test "list items" test-list-items)
@@ -341,3 +375,6 @@
 (t/test "table streaming at finish" test-table-streaming-at-finish)
 (t/test "table inline bold column alignment" test-table-inline-bold-column-alignment)
 (t/test "table ansi output" test-table-ansi-output)
+(t/test "table backtick code column alignment" test-table-backtick-code-alignment)
+(t/test "table unicode width alignment" test-table-unicode-width-alignment)
+(t/test "inline code span" test-inline-code-span)

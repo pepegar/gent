@@ -3,6 +3,7 @@
 (use ./text)
 (use ./style)
 (use ./buffer)
+(use ./charwidth)
 
 # Style definitions — mutable so themes can update them at runtime.
 # Dark-mode defaults; call (set-md-styles overrides) to adapt for light mode.
@@ -38,9 +39,9 @@
     base-style))
 
 (defn- parse-inline-spans [text base-style]
-  "Parse inline markdown (bold, italic) and return an array of spans.
-   Handles **bold**, *italic*, and ***bold+italic***."
-  (if (not (string/find "*" text))
+  "Parse inline markdown (bold, italic, code) and return an array of spans.
+   Handles **bold**, *italic*, ***bold+italic***, and `code`."
+  (if (and (not (string/find "*" text)) (not (string/find "`" text)))
     @[(span text base-style)]
     (do
       (def result @[])
@@ -52,7 +53,51 @@
 
       (while (< pos len)
         (def ch (get text pos))
-        (if (= ch (chr "*"))
+        (cond
+          # Backtick code span
+          (= ch (chr "`"))
+          (do
+            # Flush current buffer
+            (when (> (length buf) 0)
+              (array/push result (span (string buf) (compute-inline-style bold italic base-style)))
+              (buffer/clear buf))
+            # Count opening backticks
+            (var tick-count 0)
+            (while (and (< (+ pos tick-count) len)
+                        (= (get text (+ pos tick-count)) (chr "`")))
+              (++ tick-count))
+            (+= pos tick-count)
+            # Find matching closing backticks
+            (def code-buf @"")
+            (var found-close false)
+            (while (and (< pos len) (not found-close))
+              (if (= (get text pos) (chr "`"))
+                (do
+                  (var close-count 0)
+                  (while (and (< (+ pos close-count) len)
+                              (= (get text (+ pos close-count)) (chr "`")))
+                    (++ close-count))
+                  (if (= close-count tick-count)
+                    (do
+                      (set found-close true)
+                      (+= pos close-count))
+                    (do
+                      # Not matching — include these backticks as literal text
+                      (for _ 0 close-count
+                        (buffer/push code-buf (chr "`")))
+                      (+= pos close-count))))
+                (do
+                  (buffer/push code-buf (get text pos))
+                  (++ pos))))
+            (if found-close
+              (array/push result (span (string code-buf) (styles :code)))
+              (do
+                # No closing backticks — render opening backticks + content literally
+                (array/push result (span (string (string/repeat "`" tick-count) (string code-buf))
+                                         (compute-inline-style bold italic base-style))))))
+
+          # Star markers for bold/italic
+          (= ch (chr "*"))
           (do
             # Count consecutive *s
             (var star-count 0)
@@ -69,6 +114,8 @@
               (= star-count 2) (set bold (not bold))
               (set italic (not italic)))
             (set pos (+ pos star-count)))
+
+          # Regular character
           (do
             (buffer/push buf ch)
             (++ pos))))
@@ -125,22 +172,33 @@
   (map string/trim raw-cells))
 
 (defn- strip-inline-markers [text]
-  "Return the display length of text after stripping inline markdown markers (*, **, ***)."
-  (var display-len 0)
+  "Return the display width of text after stripping inline markdown markers (*, `, **)."
+  (var display-width 0)
   (var pos 0)
   (def len (length text))
   (while (< pos len)
-    (if (= (get text pos) (chr "*"))
+    (def ch (get text pos))
+    (cond
+      # Skip * markers (bold/italic)
+      (= ch (chr "*"))
       (do
-        (var star-count 0)
-        (while (and (< (+ pos star-count) len)
-                    (= (get text (+ pos star-count)) (chr "*")))
-          (++ star-count))
-        (set pos (+ pos star-count)))
+        (while (and (< pos len) (= (get text pos) (chr "*")))
+          (++ pos)))
+      # Skip ` markers (inline code)
+      (= ch (chr "`"))
       (do
-        (++ display-len)
-        (++ pos))))
-  display-len)
+        (while (and (< pos len) (= (get text pos) (chr "`")))
+          (++ pos)))
+      # Count display width of regular characters (UTF-8 aware)
+      (do
+        (def byte (get text pos))
+        (def char-len
+          (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+        (def end (min (+ pos char-len) len))
+        (def c (string/slice text pos end))
+        (+= display-width (char-width c))
+        (set pos end))))
+  display-width)
 
 (defn- compute-col-widths [rows]
   "Compute the max width per column across all rows.
@@ -156,8 +214,8 @@
   widths)
 
 (defn- pad-right [text width]
-  "Pad text with spaces to the given width."
-  (def need (- width (length text)))
+  "Pad text with spaces to the given display width (UTF-8 aware)."
+  (def need (- width (string-width text)))
   (if (<= need 0)
     text
     (string text (string/repeat " " need))))
