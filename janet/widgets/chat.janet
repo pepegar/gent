@@ -688,10 +688,17 @@
 
 (defn output-user [text]
   (when (> (length scrollback) 0) (push-line ""))  # Single blank line
-  (push-raw-line
-    @[@{:text "   user: " :style (colors :user-label)}
-      @{:text text :style (tui/style)}])
-  (put (last scrollback) :row-style :user-row-bg))
+  (def lines (string/split "\n" text))
+  (var first true)
+  (each line lines
+    (def prefix
+      (if first
+        (do (set first false)
+            @{:text "   user: " :style (colors :user-label)})
+        @{:text "         " :style (tui/style)}))
+    (push-raw-line
+      @[prefix @{:text line :style (tui/style)}])
+    (put (last scrollback) :row-style :user-row-bg)))
 
 (defn output-agent [lines]
   "Add agent response to scrollback with markdown styling."
