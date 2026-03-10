@@ -38,10 +38,18 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust
-        uses: dtolnay/rust-action/setup@v1
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install Janet
-        uses: janet-lang/setup-janet@v1
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+            git clone --depth 1 --branch v1.37.1 https://github.com/janet-lang/janet.git /tmp/janet
+            cd /tmp/janet && make -j$(nproc) && sudo make install
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install janet
+          fi
 
       - name: Run tests
         run: |
