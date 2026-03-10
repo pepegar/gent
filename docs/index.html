@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gent — the programmable coding agent</title>
+  <meta name="description" content="An open source AI coding agent with a real scripting engine. Modify tools, hooks, UI and behavior at runtime.">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --dim: #7d8590;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --surface: #161b22;
+      --border: #30363d;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .logo {
+      font-size: clamp(4rem, 12vw, 8rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      color: var(--fg);
+      line-height: 1;
+      margin-bottom: 0.25em;
+    }
+
+    .logo span {
+      color: var(--green);
+    }
+
+    .tagline {
+      font-size: clamp(1rem, 3vw, 1.35rem);
+      color: var(--dim);
+      margin-bottom: 3rem;
+      text-align: center;
+    }
+
+    .install-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0;
+      max-width: 600px;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .install-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .install-header span {
+      font-size: 0.8rem;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--dim);
+      cursor: pointer;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.75rem;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .copy-btn:hover {
+      color: var(--fg);
+      border-color: var(--dim);
+    }
+
+    .copy-btn.copied {
+      color: var(--green);
+      border-color: var(--green);
+    }
+
+    .install-box pre {
+      margin: 0;
+      padding: 1.2rem 1rem;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: clamp(0.85rem, 2vw, 1rem);
+      color: var(--fg);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.5;
+    }
+
+    .install-box pre .prompt {
+      color: var(--green);
+      user-select: none;
+    }
+
+    .links {
+      margin-top: 2.5rem;
+      display: flex;
+      gap: 2rem;
+    }
+
+    .links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: opacity 0.15s;
+    }
+
+    .links a:hover {
+      opacity: 0.8;
+      text-decoration: underline;
+    }
+
+    footer {
+      margin-top: 4rem;
+      color: var(--dim);
+      font-size: 0.8rem;
+    }
+
+    .hint {
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+      color: var(--dim);
+      font-size: 0.85rem;
+      text-align: center;
+    }
+
+    .hint code {
+      color: var(--fg);
+      background: var(--surface);
+      padding: 0.1em 0.4em;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+
+    .install-box-alt {
+      max-width: 600px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="logo"><span>&gt;</span> gent</div>
+  <p class="tagline">The programmable coding agent.</p>
+
+  <div class="install-box">
+    <div class="install-header">
+      <span>Install</span>
+      <button class="copy-btn" onclick="copyInstall(this)">Copy</button>
+    </div>
+    <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh</pre>
+  </div>
+
+  <p class="hint">Installs the latest stable release. For nightly builds from <code>main</code>:</p>
+  <div class="install-box install-box-alt">
+    <div class="install-header">
+      <span>Nightly</span>
+      <button class="copy-btn" onclick="copyNightly(this)">Copy</button>
+    </div>
+    <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh -s -- --nightly</pre>
+  </div>
+
+  <div class="links">
+    <a href="https://github.com/pepegar/gent">GitHub</a>
+    <a href="https://github.com/pepegar/gent#the-idea">Docs</a>
+  </div>
+
+  <footer>Open source · MIT</footer>
+
+  <script>
+    function copyInstall(btn) {
+      navigator.clipboard.writeText("curl -sSf https://try.gent/install.sh | sh");
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = "Copy";
+        btn.classList.remove("copied");
+      }, 2000);
+    }
+
+    function copyNightly(btn) {
+      navigator.clipboard.writeText("curl -sSf https://try.gent/install.sh | sh -s -- --nightly");
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = "Copy";
+        btn.classList.remove("copied");
+      }, 2000);
+    }
+  </script>
+
+</body>
+</html>
