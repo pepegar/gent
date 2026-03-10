@@ -279,11 +279,13 @@
   "Render a table data row as a line with styled spans."
   (def spans @[])
   (def border-style (styles :list-marker))
+  (def ncols (min (length cells) (length widths)))
   (array/push spans (span "│" border-style))
-  (for c 0 (length cells)
-    (def cell-text (get cells c))
+  (for c 0 ncols
+    (def cell-text (get cells c ""))
     (def display-width (strip-inline-markers cell-text))
-    (def pad-amount (- (get widths c) display-width))
+    (def col-width (get widths c 0))
+    (def pad-amount (- col-width display-width))
     (array/push spans (span " " style-default))
     (array/concat spans (parse-inline-spans cell-text cell-style))
     (when (> pad-amount 0)
