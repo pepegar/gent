@@ -124,18 +124,18 @@
   (os/mkdir path)
   path)
 
-(defn- write-session [base-dir sid messages &opt mtime]
-  "Write a mock session history file."
+(defn- write-session [base-dir sid messages &opt delay]
+  "Write a mock session history file.
+   If delay is given, sleep that many seconds before writing
+   to ensure distinct modification times."
+  (when delay (os/sleep delay))
   (def session-dir (string base-dir "/" sid))
   (os/mkdir session-dir)
   (def history-path (string session-dir "/history"))
   (def buf @"")
   (each msg messages
     (buffer/push buf (string/format "%j" msg) "\n"))
-  (spit history-path (string buf))
-  # Set modification time if provided (touch with a delay to ensure ordering)
-  (when mtime
-    (os/sleep mtime)))
+  (spit history-path (string buf)))
 
 (defn- rm-rf [path]
   "Remove a directory recursively."
@@ -155,7 +155,7 @@
                                                     (write-session tmp "session2"
                                                       [{:role "user" :content "hello from session 2"}
                                                        {:role "assistant" :content "response"}]
-                                                      0.01)
+                                                      1.1)
                                                     (ih/init tmp)
                                                     (def entries (ih/get-entries))
                                                     # Should have user string messages from both sessions
@@ -241,7 +241,7 @@
                                                    [{:role "user" :content "from session 1"}])
                                                  (write-session tmp "session2"
                                                    [{:role "user" :content "from session 2"}]
-                                                   0.01)
+                                                   1.1)
                                                  (ih/init tmp)
                                                  (ih/push "current session")
                                                  # prev should walk back through all entries
