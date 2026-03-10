@@ -68,6 +68,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --unreleased --strip header
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -95,6 +106,8 @@ jobs:
             Built from commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
 
             > ⚠️ This is a development build. For stable releases, see the [latest release](https://github.com/${{ github.repository }}/releases/latest).
+
+            ${{ steps.cliff.outputs.content }}
           prerelease: true
           make_latest: false
           files: |

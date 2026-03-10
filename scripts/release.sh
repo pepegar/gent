@@ -53,9 +53,15 @@ echo "==> Verifying build and tests"
 cargo build
 janet janet/test/run.janet
 
+# Update CHANGELOG.md
+if command -v git-cliff &>/dev/null; then
+  echo "==> Updating CHANGELOG.md"
+  git-cliff --config cliff.toml --output CHANGELOG.md
+fi
+
 # Commit and tag
 echo "==> Committing version bump"
-git add Cargo.toml Cargo.lock flake.nix
+git add Cargo.toml Cargo.lock flake.nix CHANGELOG.md
 git commit -m "release: ${TAG}"
 
 echo "==> Creating tag ${TAG}"
