@@ -26,7 +26,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
           - target: aarch64-apple-darwin
             os: macos-14
           - target: x86_64-unknown-linux-gnu
@@ -51,20 +51,24 @@ jobs:
             brew install janet
           fi
 
+      - name: Add cross-compile target
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
+
       - name: Run tests
         run: |
           cargo build
           janet janet/test/run.janet
 
       - name: Build release binary
-        run: cargo build --release --features embedded
+        run: cargo build --release --features embedded --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
         run: |
-          cd target/release
-          tar czf ../../gent-${{ matrix.target }}.tar.gz gent
-          cd ../..
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../gent-${{ matrix.target }}.tar.gz gent
+          cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
