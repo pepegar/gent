@@ -148,6 +148,50 @@ During a session:
 - `/profile dump` — export Chrome Trace Event JSON to `.gent/profile-<timestamp>.json`
 - `/profile reset` — clear all profiling data (useful to isolate a specific interaction)
 
+## Commits
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). All commit messages **must** follow this format:
+
+```
+<type>(<optional scope>): <description>
+```
+
+### Types
+
+- `feat` — new feature (bumps minor version)
+- `fix` — bug fix (bumps patch version)
+- `refactor` — code change that neither fixes a bug nor adds a feature
+- `chore` — build, CI, tooling, or dependency changes
+- `docs` — documentation only
+- `test` — adding or fixing tests
+- `perf` — performance improvement
+- `style` — formatting, whitespace (not CSS)
+- `ci` — CI/CD changes
+- `build` — build system changes
+
+### Examples
+
+```
+feat: add file picker widget
+feat(tui): word wrap for wide characters
+fix: scroll offset clamp on resize
+refactor(hooks): simplify dispatch loop
+chore: bump janetrs to 0.9
+docs: add profiling section to AGENTS.md
+test: snapshot tests for dialog widget
+```
+
+### Breaking changes
+
+Append `!` after the type for breaking changes:
+
+```
+feat!: remove legacy session format
+refactor(api)!: rename provider config keys
+```
+
+Release Drafter uses these prefixes to auto-categorize release notes.
+
 ## Dependencies
 
 - **Rust** + **Cargo** for building
