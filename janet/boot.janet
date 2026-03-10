@@ -32,6 +32,7 @@
 (import commands/introspection)
 (import commands/profile)
 (import commands/model)
+(import commands/provider)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)

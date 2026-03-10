@@ -75,6 +75,7 @@
    :function (fn [args]
               (def cfg (api/get-config))
               (def lines @["API configuration:"
+                           (string "  provider: " (get cfg :provider "unknown"))
                            (string "  model: " (get cfg :model))
                            (string "  url: " (get cfg :url))
                            (string "  max-tokens: " (get cfg :max-tokens))

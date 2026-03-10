@@ -1,34 +1,71 @@
-# Anthropic Messages API — builds requests and parses responses.
+# Provider-agnostic API layer — delegates to the active provider backend.
 # All HTTP is done via the native http/request function provided by Rust.
 #
 # Configuration priority for API keys:
 #   1. Explicit set-api-key (runtime override via auth module)
 #   2. GENT_API_KEY environment variable (explicit session override)
 #   3. auth.json credential (API key or OAuth token, via auth module)
-#   4. ANTHROPIC_API_KEY environment variable
+#   4. Provider-specific environment variable (e.g. ANTHROPIC_API_KEY)
 #   5. Auth module fallback resolver
 #
 # Other configuration:
-#   GENT_API_URL    — API endpoint (default: Anthropic)
+#   GENT_API_URL    — API endpoint (default: from active provider)
 #   GENT_MODEL      — model name
 #   GENT_MAX_TOKENS — max tokens per response
 
 (import core/auth :as auth)
 
-(def- defaults
-  {:url "https://api.anthropic.com/v1/messages"
-   :model "claude-sonnet-4-20250514"
-   :max-tokens 8192})
+# ── Config ───────────────────────────────────────────────────
 
-# Mutable config — env vars override defaults, set-* overrides everything
+# Mutable config — env vars override defaults, set-* overrides everything.
+# Initial defaults are Anthropic; they get overridden when set-provider is called.
 (var- config
-  @{:url (or (os/getenv "GENT_API_URL") (defaults :url))
-    :model (or (os/getenv "GENT_MODEL") (defaults :model))
+  @{:url (or (os/getenv "GENT_API_URL") "https://api.anthropic.com/v1/messages")
+    :model (or (os/getenv "GENT_MODEL") "claude-sonnet-4-20250514")
     :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
-                  (if env (scan-number env) (defaults :max-tokens)))
+                  (if env (scan-number env) 8192))
     :api-key nil  # nil means "resolve dynamically via auth module"
     :thinking-enabled true
     :thinking-budget 4096})
+
+# ── Provider registry ────────────────────────────────────────
+
+(var- providers @{})
+(var- active-provider-id "anthropic")
+
+(defn register-api-provider
+  "Register an API provider backend. provider is a table with :id and provider functions."
+  [provider]
+  (put providers (provider :id) provider))
+
+(defn get-api-provider
+  "Get a provider by ID, or nil."
+  [id]
+  (get providers id))
+
+(defn set-provider
+  "Switch to a different API provider. Resets model/url to provider defaults."
+  [id]
+  (def p (get providers id))
+  (unless p (error (string "Unknown API provider: " id)))
+  (set active-provider-id id)
+  (put config :url (or (os/getenv "GENT_API_URL") (p :default-url)))
+  (put config :model (or (os/getenv "GENT_MODEL") (p :default-model)))
+  (when (p :default-max-tokens)
+    (put config :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
+                              (if env (scan-number env) (p :default-max-tokens))))))
+
+(defn get-active-provider
+  "Return the active provider table."
+  []
+  (get providers active-provider-id))
+
+(defn get-active-provider-id
+  "Return the active provider ID string."
+  []
+  active-provider-id)
+
+# ── Config setters ───────────────────────────────────────────
 
 (defn set-url [url] (put config :url url))
 (defn set-model [m] (put config :model m))
@@ -42,19 +79,24 @@
   [k]
   (put config :api-key k)
   # Also set it as a runtime override so auth/get-api-key returns it
-  (auth/set-runtime-key "anthropic" k))
+  (def p (get-active-provider))
+  (def auth-provider (or (when p (p :auth-provider)) "anthropic"))
+  (auth/set-runtime-key auth-provider k))
 
 (defn get-config
   "Return the current API configuration (for introspection)."
   []
   (def result (table/clone config))
+  (def p (get-active-provider))
+  (def auth-provider (or (when p (p :auth-provider)) "anthropic"))
+  (put result :provider active-provider-id)
   # Resolve the effective API key for display (masked)
-  (def effective-key (auth/get-api-key "anthropic"))
+  (def effective-key (auth/get-api-key auth-provider))
   (when effective-key
     (put result :api-key-source
       (cond
         (config :api-key) "explicit (set-api-key)"
-        (auth/has-credential? "anthropic") "auth.json"
+        (auth/has-credential? auth-provider) "auth.json"
         (os/getenv "GENT_API_KEY") "GENT_API_KEY"
         (os/getenv "ANTHROPIC_API_KEY") "ANTHROPIC_API_KEY"
         "unknown"))
@@ -73,161 +115,47 @@
   (put parts (- (length parts) 1) "models")
   (string/join parts "/"))
 
-(defn- using-custom-url? []
-  "Check if the API URL is overridden (not the default Anthropic endpoint)."
-  (not= (config :url) (defaults :url)))
-
 (defn- resolve-api-key []
   "Resolve the API key from all sources. Throws if none found."
+  (def p (get-active-provider))
+  (def auth-provider (or (when p (p :auth-provider)) "anthropic"))
+
   # 1. Explicit config (already registered as runtime override in auth)
   (when (config :api-key)
     (break (config :api-key)))
 
-  # 2. GENT_API_KEY — explicit env var for this session, takes priority over stored credentials.
-  #    This is critical when using a custom API URL (e.g. LiteLLM) alongside stored Anthropic OAuth tokens.
+  # 2. GENT_API_KEY — explicit env var for this session
   (def gent-key (os/getenv "GENT_API_KEY"))
   (when gent-key (break gent-key))
 
-  # 3-5. Auth module handles the full resolution chain (auth.json, ANTHROPIC_API_KEY, fallback)
-  (def key (auth/get-api-key "anthropic"))
+  # 3-5. Auth module handles the full resolution chain
+  (def key (auth/get-api-key auth-provider))
   (when key (break key))
 
-  (error (string "No API key found. Options:\n"
-                  "  • /login anthropic     — OAuth login (Claude Pro/Max subscription)\n"
-                  "  • ANTHROPIC_API_KEY    — set environment variable\n"
+  (error (string "No API key found for provider '" auth-provider "'. Options:\n"
+                  "  • /login " auth-provider "     — OAuth login\n"
+                  "  • Set the appropriate environment variable\n"
                   "  • (api/set-api-key k)  — set in init.janet")))
 
-(defn- oauth-token? []
-  "Check if the current credential is an OAuth token.
-   Returns false when using a custom URL — OAuth tokens are Anthropic-specific."
-  (when (using-custom-url?) (break false))
-  (when (config :api-key) (break false))
-  (when (os/getenv "GENT_API_KEY") (break false))
-  (def cred (auth/get-credential "anthropic"))
-  (and cred (= "oauth" (get cred "type"))))
+# ── Provider-delegating functions ────────────────────────────
 
-(defn- build-headers []
-  (def api-key (resolve-api-key))
-  (def is-oauth (oauth-token?))
-  (def custom-url (using-custom-url?))
-  (def headers
-    @{"content-type" "application/json"
-      "anthropic-version" "2023-06-01"})
-  (cond
-    is-oauth
-    (do
-      (put headers "authorization" (string "Bearer " api-key))
-      (put headers "anthropic-beta" "claude-code-20250219,oauth-2025-04-20")
-      (put headers "anthropic-dangerous-direct-browser-access" "true")
-      (put headers "user-agent" "claude-cli/2.1.2 (external, cli)")
-      (put headers "x-app" "cli"))
-
-    custom-url
-    (put headers "authorization" (string "Bearer " api-key))
-
-    # Default Anthropic API with API key
-    (put headers "x-api-key" api-key))
-  headers)
+(defn- resolve-config []
+  "Build the full config table with resolved API key for provider functions."
+  (def resolved @{})
+  (eachp [k v] config (put resolved k v))
+  (put resolved :resolved-api-key (resolve-api-key))
+  resolved)
 
 (defn list-models
-  "Fetch available models from the provider. Returns an array of model tables
-   (each with at least :id) or nil on error. Handles Anthropic pagination."
+  "Fetch available models from the active provider."
   []
-  (def headers (build-headers))
-  (def base-url (models-url))
-  (def all-models @[])
-  (var after-id nil)
-  (var keep-going true)
-  (while keep-going
-    (def url
-      (if after-id
-        (string base-url "?after_id=" after-id "&limit=100")
-        (string base-url "?limit=100")))
-    (def response (http/request "GET" url headers nil))
-    (when (nil? response)
-      (set keep-going false)
-      (break))
-    (def parsed (json/decode response))
-    (when (nil? parsed)
-      (set keep-going false)
-      (break))
-    (def data (get parsed :data))
-    (when (or (nil? data) (not (indexed? data)))
-      (set keep-going false)
-      (break))
-    (array/concat all-models data)
-    (if (get parsed :has_more)
-      (set after-id (get parsed :last_id))
-      (set keep-going false)))
-  (if (empty? all-models) nil all-models))
-
-(def- claude-code-identity "You are Claude Code, Anthropic's official CLI for Claude.")
-
-(defn- wrap-system-prompt [system-prompt]
-  "For OAuth tokens, prepend Claude Code identity to the system prompt."
-  (if (oauth-token?)
-    (if system-prompt
-      (string claude-code-identity "\n\n" system-prompt)
-      claude-code-identity)
-    system-prompt))
-
-(defn- build-body [conversation tools &opt system-prompt]
-  (def budget (config :thinking-budget))
-  (def max-tok (config :max-tokens))
-  (def body @{:model (config :model)
-              :max_tokens (if (and (config :thinking-enabled) (<= max-tok budget))
-                            (+ budget 4096)
-                            max-tok)
-              :messages conversation
-              :tools tools})
-  (when (config :thinking-enabled)
-    (put body :thinking @{:type "enabled"
-                          :budget_tokens budget}))
-  (def effective-prompt (wrap-system-prompt system-prompt))
-  (when effective-prompt
-    (put body :system effective-prompt))
-  (json/encode body))
-
-(defn chat
-  "Send a conversation to Claude. Returns the parsed response message.
-   conversation: array of {:role ... :content ...}
-   tools: array of tool definitions (from tools/definitions)
-   &opt system-prompt: string"
-  [conversation tools &opt system-prompt]
-  (def headers (build-headers))
-  (def body (build-body conversation tools system-prompt))
-  (def response (http/request "POST" (config :url) headers body))
-  (when (nil? response)
-    (error "API request failed — got nil response"))
-  (json/decode response))
-
-(defn- build-body-stream [conversation tools &opt system-prompt]
-  "Build request body with stream: true."
-  (def budget (config :thinking-budget))
-  (def max-tok (config :max-tokens))
-  (def body @{:model (config :model)
-              :max_tokens (if (and (config :thinking-enabled) (<= max-tok budget))
-                            (+ budget 4096)
-                            max-tok)
-              :messages conversation
-              :tools tools
-              :stream true})
-  (when (config :thinking-enabled)
-    (put body :thinking @{:type "enabled"
-                          :budget_tokens budget}))
-  (def effective-prompt (wrap-system-prompt system-prompt))
-  (when effective-prompt
-    (put body :system effective-prompt))
-  (json/encode body))
-
-# ── SSE stream parser ──────────────────────────────────────────
-#
-# A stateful parser that processes SSE lines one at a time.
-# Create with (new-stream-parser callbacks), feed lines with (:feed parser line),
-# finalize with (:finish parser) to get the reconstructed response.
+  (def p (get-active-provider))
+  (when (and p (p :list-models))
+    (break ((p :list-models) (resolve-config))))
+  nil)
 
 (defn new-stream-parser
-  ``Create a new SSE stream parser.
+  ``Create a new SSE stream parser using the active provider's parser.
 
   callbacks: a table of callback functions:
     :on-text        (fn [text])           — called with each text delta
@@ -240,156 +168,13 @@
   Returns a parser table with :feed and :finish methods.
   ``
   [callbacks]
-  (var stop-reason nil)
-  (var current-block-type nil)
-  (var current-block-index nil)
-  (var current-tool-id nil)
-  (var current-tool-name nil)
-  (var current-input-json @"")
-  (def content-blocks @[])
-  (def text-accum @"")
-  (def thinking-accum @"")
-  (def thinking-signature @"")
-  (var usage nil)
-  (var had-error false)
-
-  (defn feed-line [line]
-    "Process a single SSE line. Returns nil."
-    # SSE lines: "data: {...}" or "event: ..." or empty
-    (when (string/has-prefix? "data: " line)
-      (def data-str (string/slice line 6))
-
-      # [DONE] marker
-      (when (= data-str "[DONE]") (break))
-
-      (def event (json/decode data-str))
-      (when (nil? event) (break))
-
-      (def etype (get event :type))
-
-      (case etype
-        # message_start — contains the message skeleton
-        "message_start"
-        (do
-          (def msg (get event :message))
-          (when msg
-            (set stop-reason (get msg :stop_reason))))
-
-        # content_block_start — a new content block begins
-        "content_block_start"
-        (do
-          (def idx (get event :index))
-          (def block (get event :content_block))
-          (set current-block-index idx)
-          (set current-block-type (get block :type))
-          (when (= "tool_use" current-block-type)
-            (set current-tool-id (get block :id))
-            (set current-tool-name (get block :name))
-            (buffer/clear current-input-json)
-            (when-let [cb (get callbacks :on-tool-start)]
-              (cb current-tool-name)))
-          (when (= "text" current-block-type)
-            (buffer/clear text-accum))
-          (when (= "thinking" current-block-type)
-            (buffer/clear thinking-accum)
-            (buffer/clear thinking-signature)))
-
-        # content_block_delta — incremental content
-        "content_block_delta"
-        (do
-          (def delta (get event :delta))
-          (def dtype (get delta :type))
-          (case dtype
-            "text_delta"
-            (do
-              (def text (get delta :text ""))
-              (buffer/push text-accum text)
-              (when-let [cb (get callbacks :on-text)]
-                (cb text)))
-
-            "thinking_delta"
-            (do
-              (def text (get delta :thinking ""))
-              (buffer/push thinking-accum text)
-              (when-let [cb (get callbacks :on-thinking)]
-                (cb text)))
-
-            "signature_delta"
-            (do
-              (def sig (get delta :signature ""))
-              (buffer/push thinking-signature sig))
-
-            "input_json_delta"
-            (do
-              (def partial (get delta :partial_json ""))
-              (buffer/push current-input-json partial)
-              (when-let [cb (get callbacks :on-tool-delta)]
-                (cb current-tool-name (length current-input-json))))))
-
-        # content_block_stop — block is complete
-        "content_block_stop"
-        (do
-          (case current-block-type
-            "text"
-            (array/push content-blocks
-                        {:type "text" :text (string text-accum)})
-
-            "thinking"
-            (do
-              (def block @{:type "thinking"
-                           :thinking (string thinking-accum)})
-              (when (> (length thinking-signature) 0)
-                (put block :signature (string thinking-signature)))
-              (array/push content-blocks block))
-
-            "tool_use"
-            (do
-              (def parsed-input (json/decode (string current-input-json)))
-              (def block {:type "tool_use"
-                          :id current-tool-id
-                          :name current-tool-name
-                          :input (or parsed-input @{})})
-              (array/push content-blocks block)
-              (when-let [cb (get callbacks :on-tool-use)]
-                (cb current-tool-id current-tool-name (or parsed-input @{})))))
-
-          (set current-block-type nil))
-
-        # message_delta — final stop_reason, usage
-        "message_delta"
-        (do
-          (def delta (get event :delta))
-          (when delta
-            (set stop-reason (get delta :stop_reason stop-reason)))
-          (set usage (get event :usage)))
-
-        # message_stop — stream is done
-        "message_stop"
-        nil
-
-        # error
-        "error"
-        (do
-          (set had-error true)
-          (def err-msg (get-in event [:error :message] "unknown streaming error"))
-          (when-let [cb (get callbacks :on-error)]
-            (cb err-msg))))))
-
-  (defn finish []
-    "Finalize and return the reconstructed response."
-    (def response @{:role "assistant"
-                     :content content-blocks
-                     :stop_reason stop-reason
-                     :type "message"})
-    (when usage (put response :usage usage))
-    response)
-
-  @{:feed feed-line
-    :finish finish
-    :had-error (fn [] had-error)})
+  (def p (get-active-provider))
+  (when (and p (p :new-stream-parser))
+    (break ((p :new-stream-parser) callbacks)))
+  (error "No active provider or provider has no stream parser"))
 
 (defn stream-start
-  ``Start a non-blocking streaming request to Claude.
+  ``Start a non-blocking streaming request to the active provider.
 
   Returns a table with:
     :parser     — the SSE stream parser (feed lines with (:feed parser line))
@@ -399,17 +184,39 @@
   Call (:finish (:parser result)) when done to get the response.
   ``
   [conversation tools callbacks &opt system-prompt]
-  (def headers (build-headers))
-  (def body (build-body-stream conversation tools system-prompt))
-  (def parser (new-stream-parser callbacks))
+  (def p (get-active-provider))
+  (unless p (error "No active API provider"))
+  (def resolved (resolve-config))
+  (def headers ((p :build-headers) resolved))
+  (def converted-tools (if (p :convert-tools) ((p :convert-tools) tools) tools))
+  (def body ((p :build-body) resolved conversation converted-tools system-prompt))
+  (def parser ((p :new-stream-parser) callbacks))
 
   # Start the background HTTP stream — returns a stream-id
   (def stream-id (http/stream-start "POST" (config :url) headers body))
 
   @{:parser parser :stream-id stream-id})
 
+(defn chat
+  "Send a conversation to the active provider (non-streaming)."
+  [conversation tools &opt system-prompt]
+  (def p (get-active-provider))
+  (unless p (error "No active API provider"))
+  (def resolved (resolve-config))
+  (def headers ((p :build-headers) resolved))
+  (def converted-tools (if (p :convert-tools) ((p :convert-tools) tools) tools))
+  (def body
+    (if (p :build-body-no-stream)
+      ((p :build-body-no-stream) resolved conversation converted-tools system-prompt)
+      # Fallback: use streaming body builder (some providers only have one)
+      ((p :build-body) resolved conversation converted-tools system-prompt)))
+  (def response (http/request "POST" (config :url) headers body))
+  (when (nil? response)
+    (error "API request failed — got nil response"))
+  (json/decode response))
+
 (defn chat-stream
-  ``Send a conversation to Claude with SSE streaming (blocking).
+  ``Send a conversation with SSE streaming (blocking).
 
   callbacks: a table of callback functions:
     :on-text      (fn [text])           — called with each text delta
@@ -421,12 +228,14 @@
   Returns the full reconstructed response (same shape as non-streaming chat).
   ``
   [conversation tools callbacks &opt system-prompt]
-  (def headers (build-headers))
-  (def body (build-body-stream conversation tools system-prompt))
+  (def p (get-active-provider))
+  (unless p (error "No active API provider"))
+  (def resolved (resolve-config))
+  (def headers ((p :build-headers) resolved))
+  (def converted-tools (if (p :convert-tools) ((p :convert-tools) tools) tools))
+  (def body ((p :build-body) resolved conversation converted-tools system-prompt))
+  (def parser ((p :new-stream-parser) callbacks))
 
-  (def parser (new-stream-parser callbacks))
-
-  # Make the streaming request (blocking — calls parser for each line)
   (def result
     (try
       (http/stream "POST" (config :url) headers body (fn [line] ((parser :feed) line)))
@@ -437,8 +246,43 @@
 
   (def response ((parser :finish)))
 
-  # Call on-done callback
   (when-let [cb (get callbacks :on-done)]
     (cb response))
 
   response)
+
+# ── Register built-in Anthropic provider ─────────────────────
+
+(import core/providers/anthropic :as anthropic)
+
+(register-api-provider
+  @{:id "anthropic"
+    :name "Anthropic"
+    :auth-provider "anthropic"
+    :default-url "https://api.anthropic.com/v1/messages"
+    :default-model "claude-sonnet-4-20250514"
+    :default-max-tokens 8192
+    :build-headers anthropic/build-headers
+    :convert-tools anthropic/convert-tools
+    :build-body anthropic/build-body
+    :build-body-no-stream anthropic/build-body-no-stream
+    :new-stream-parser anthropic/new-stream-parser
+    :list-models anthropic/list-models})
+
+# ── Register built-in OpenAI provider ────────────────────────
+
+(import core/providers/openai :as openai)
+
+(register-api-provider
+  @{:id "openai"
+    :name "OpenAI (Codex)"
+    :auth-provider "openai"
+    :default-url "https://chatgpt.com/backend-api/codex/responses"
+    :default-model "gpt-5.1"
+    :default-max-tokens 16384
+    :build-headers openai/build-headers
+    :convert-tools openai/convert-tools
+    :build-body openai/build-body
+    :build-body-no-stream openai/build-body-no-stream
+    :new-stream-parser openai/new-stream-parser
+    :list-models openai/list-models})

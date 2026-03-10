@@ -1,0 +1,268 @@
+# test-openai-provider.janet — Tests for the OpenAI Codex Responses API provider.
+
+(import test/helper :as t)
+(import core/providers/openai :as openai)
+(import core/api :as api)
+
+(print "── openai provider ──")
+
+# ── Tool conversion ──────────────────────────────────────────
+
+(t/test "convert-tools transforms canonical to OpenAI function format"
+  (fn []
+    (def tools @[{:name "bash"
+                  :description "Run a bash command"
+                  :input_schema {:type "object"
+                                 :properties {:command {:type "string"}}
+                                 :required ["command"]}}])
+    (def converted (openai/convert-tools tools))
+    (t/assert= 1 (length converted))
+    (def tool (first converted))
+    (t/assert= "function" (tool :type))
+    (t/assert= "bash" (tool :name))
+    (t/assert= "Run a bash command" (tool :description))
+    (t/assert= "object" (get-in tool [:parameters :type]))))
+
+(t/test "convert-tools handles multiple tools"
+  (fn []
+    (def tools @[{:name "a" :description "A" :input_schema {:type "object"}}
+                 {:name "b" :description "B" :input_schema {:type "object"}}])
+    (def converted (openai/convert-tools tools))
+    (t/assert= 2 (length converted))
+    (t/assert= "a" ((first converted) :name))
+    (t/assert= "b" ((get converted 1) :name))))
+
+# ── Headers ──────────────────────────────────────────────────
+
+(t/test "build-headers includes Bearer token"
+  (fn []
+    (def headers (openai/build-headers @{:resolved-api-key "sk-test-key" :url "https://api.openai.com/v1/responses"}))
+    (t/assert= "Bearer sk-test-key" (get headers "authorization"))
+    (t/assert= "application/json" (get headers "content-type"))
+    (t/assert= "text/event-stream" (get headers "accept"))))
+
+# ── SSE parser: text response ────────────────────────────────
+
+(t/test "parser handles text response"
+  (fn []
+    (var text-buf @"")
+    (def parser (openai/new-stream-parser
+                  @{:on-text (fn [t] (buffer/push text-buf t))}))
+
+    # output_item.added (message)
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.added"
+                                                     :output_index 0
+                                                     :item @{:type "message" :id "msg_1"
+                                                             :role "assistant"
+                                                             :content @[]}})))
+    # text delta
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_text.delta"
+                                                     :output_index 0
+                                                     :delta "Hello "})))
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_text.delta"
+                                                     :output_index 0
+                                                     :delta "world!"})))
+    # output_item.done
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.done"
+                                                     :output_index 0
+                                                     :item @{:type "message" :id "msg_1"
+                                                             :role "assistant"
+                                                             :status "completed"
+                                                             :content @[@{:type "output_text"
+                                                                          :text "Hello world!"}]}})))
+    # response.completed
+    ((parser :feed) (string "data: " (json/encode @{:type "response.completed"
+                                                     :response @{:status "completed"}})))
+
+    (t/assert= "Hello world!" (string text-buf))
+    (def result ((parser :finish)))
+    (t/assert= "assistant" (result :role))
+    (t/assert= "end_turn" (result :stop_reason))
+    (t/assert= 1 (length (result :content)))
+    (t/assert= "text" (get-in result [:content 0 :type]))
+    (t/assert= "Hello world!" (get-in result [:content 0 :text]))))
+
+# ── SSE parser: tool call response ───────────────────────────
+
+(t/test "parser handles function call response"
+  (fn []
+    (var tool-started nil)
+    (var tool-used nil)
+    (def parser (openai/new-stream-parser
+                  @{:on-tool-start (fn [name] (set tool-started name))
+                    :on-tool-use (fn [id name input] (set tool-used @{:id id :name name :input input}))}))
+
+    # function_call added
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.added"
+                                                     :output_index 0
+                                                     :item @{:type "function_call"
+                                                             :call_id "call_123"
+                                                             :name "bash"}})))
+    (t/assert= "bash" tool-started)
+
+    # arguments delta
+    ((parser :feed) (string "data: " (json/encode @{:type "response.function_call_arguments.delta"
+                                                     :output_index 0
+                                                     :delta "{\"command\":\"ls\"}"})))
+
+    # function_call done
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.done"
+                                                     :output_index 0
+                                                     :item @{:type "function_call"
+                                                             :call_id "call_123"
+                                                             :name "bash"
+                                                             :arguments "{\"command\":\"ls\"}"}})))
+
+    ((parser :feed) (string "data: " (json/encode @{:type "response.completed"
+                                                     :response @{:status "completed"}})))
+
+    (t/assert= "call_123" (tool-used :id))
+    (t/assert= "bash" (tool-used :name))
+    (t/assert= "ls" (get-in tool-used [:input :command]))
+
+    (def result ((parser :finish)))
+    (t/assert= "tool_use" (result :stop_reason))
+    (t/assert= 1 (length (result :content)))
+    (def block (first (result :content)))
+    (t/assert= "tool_use" (block :type))
+    (t/assert= "call_123" (block :id))
+    (t/assert= "bash" (block :name))))
+
+# ── SSE parser: error response ───────────────────────────────
+
+(t/test "parser handles error response"
+  (fn []
+    (var error-msg nil)
+    (def parser (openai/new-stream-parser
+                  @{:on-error (fn [err] (set error-msg err))}))
+
+    ((parser :feed) (string "data: " (json/encode @{:type "response.failed"
+                                                     :response @{:error @{:message "rate limited"}}})))
+
+    (t/assert= "rate limited" error-msg)
+    (t/assert-truthy ((parser :had-error)))))
+
+# ── SSE parser: reasoning/thinking ───────────────────────────
+
+(t/test "parser handles reasoning with summary"
+  (fn []
+    (var thinking-buf @"")
+    (def parser (openai/new-stream-parser
+                  @{:on-thinking (fn [t] (buffer/push thinking-buf t))}))
+
+    # reasoning item added
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.added"
+                                                     :output_index 0
+                                                     :item @{:type "reasoning"}})))
+    # reasoning summary delta
+    ((parser :feed) (string "data: " (json/encode @{:type "response.reasoning_summary_text.delta"
+                                                     :output_index 0
+                                                     :delta "Let me think..."})))
+
+    # reasoning done with encrypted_content
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.done"
+                                                     :output_index 0
+                                                     :item @{:type "reasoning"
+                                                             :encrypted_content "sig123"}})))
+
+    # text response after reasoning
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.added"
+                                                     :output_index 1
+                                                     :item @{:type "message" :id "msg_1"
+                                                             :role "assistant"
+                                                             :content @[]}})))
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_text.delta"
+                                                     :output_index 1
+                                                     :delta "Answer"})))
+    ((parser :feed) (string "data: " (json/encode @{:type "response.output_item.done"
+                                                     :output_index 1
+                                                     :item @{:type "message" :id "msg_1"
+                                                             :content @[@{:type "output_text"
+                                                                          :text "Answer"}]}})))
+
+    ((parser :feed) (string "data: " (json/encode @{:type "response.completed"
+                                                     :response @{:status "completed"}})))
+
+    (t/assert= "Let me think..." (string thinking-buf))
+    (def result ((parser :finish)))
+    (t/assert= 2 (length (result :content)))
+    (def thinking-block (first (result :content)))
+    (t/assert= "thinking" (thinking-block :type))
+    (t/assert= "Let me think..." (thinking-block :thinking))
+    (t/assert= "sig123" (thinking-block :signature))))
+
+# ── SSE parser: [DONE] marker ────────────────────────────────
+
+(t/test "parser handles [DONE] marker"
+  (fn []
+    (def parser (openai/new-stream-parser @{}))
+    ((parser :feed) "data: [DONE]")
+    (def result ((parser :finish)))
+    (t/assert= "assistant" (result :role))
+    (t/assert-falsy ((parser :had-error)))))
+
+# ── Model listing ────────────────────────────────────────────
+
+(t/test "list-models returns static list"
+  (fn []
+    (def models (openai/list-models @{}))
+    (t/assert-truthy (> (length models) 0))
+    (def ids (map |($ :id) models))
+    (t/assert-truthy (some |(= $ "gpt-5.1") ids))
+    (t/assert-truthy (some |(= $ "gpt-5.1-codex-mini") ids))))
+
+# ── Provider registration ────────────────────────────────────
+
+(t/test "openai provider is registered in api"
+  (fn []
+    (def p (api/get-api-provider "openai"))
+    (t/assert-truthy p)
+    (t/assert= "OpenAI (Codex)" (p :name))
+    (t/assert= "openai" (p :auth-provider))))
+
+(t/test "set-provider to openai changes config"
+  (fn []
+    # Save current state
+    (def old-cfg (api/get-config))
+    # Switch to openai
+    (api/set-provider "openai")
+    (def cfg (api/get-config))
+    (t/assert= "openai" (cfg :provider))
+    (t/assert= "gpt-5.1" (cfg :model))
+    # Switch back
+    (api/set-provider "anthropic")
+    (def cfg2 (api/get-config))
+    (t/assert= "anthropic" (cfg2 :provider))
+    (t/assert= "claude-sonnet-4-20250514" (cfg2 :model))))
+
+(t/test "set-provider rejects unknown provider"
+  (fn []
+    (var caught false)
+    (try
+      (api/set-provider "nonexistent")
+      ([err] (set caught true)))
+    (t/assert-truthy caught)))
+
+# ── Request body ─────────────────────────────────────────────
+
+(t/test "build-body includes instructions and tools"
+  (fn []
+    (def config @{:model "gpt-5.1" :thinking-enabled false :max-tokens 8192})
+    (def conversation @[@{:role "user" :content "hello"}])
+    (def tools @[@{:type "function" :name "bash" :description "Run command"
+                   :parameters @{:type "object"}}])
+    (def body-str (openai/build-body config conversation tools "Be helpful"))
+    (def body (json/decode body-str))
+    (t/assert= "gpt-5.1" (body :model))
+    (t/assert-truthy (body :stream))
+    (t/assert= "Be helpful" (body :instructions))
+    (t/assert= 1 (length (body :tools)))
+    (t/assert= 1 (length (body :input)))))
+
+(t/test "build-body adds reasoning when thinking enabled"
+  (fn []
+    (def config @{:model "gpt-5.1" :thinking-enabled true :max-tokens 8192 :thinking-budget 4096})
+    (def body-str (openai/build-body config @[] @[]))
+    (def body (json/decode body-str))
+    (t/assert-truthy (body :reasoning))
+    (t/assert= "high" (get-in body [:reasoning :effort]))))

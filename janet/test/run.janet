@@ -56,7 +56,8 @@
    "test/test-bash-progress"
    "test/test-bash-progress-integration"
    "test/test-ansi"
-   "test/test-auth"])
+   "test/test-auth"
+   "test/test-openai-provider"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native
