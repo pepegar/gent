@@ -266,3 +266,68 @@
     (def body (json/decode body-str))
     (t/assert-truthy (body :reasoning))
     (t/assert= "high" (get-in body [:reasoning :effort]))))
+
+(t/test "build-body assistant message items do NOT include summary field"
+  (fn []
+    (def config @{:model "gpt-5.1" :thinking-enabled false :max-tokens 8192})
+    (def conversation @[@{:role "user" :content "hello"}
+                        @{:role "assistant"
+                          :content @[@{:type "text" :text "Hi there!"}]}
+                        @{:role "user" :content "thanks"}])
+    (def body-str (openai/build-body config conversation @[]))
+    (def body (json/decode body-str))
+    (def input (body :input))
+    # Find the message item (assistant response)
+    (var msg-item nil)
+    (each item input
+      (when (= (get item :type) "message")
+        (set msg-item item)))
+    (t/assert-truthy msg-item)
+    # Message items must NOT have summary (only reasoning items do)
+    (t/assert-falsy (get msg-item :summary))))
+
+(t/test "build-body reasoning items always have non-empty summary"
+  (fn []
+    (def config @{:model "gpt-5.1" :thinking-enabled true :max-tokens 8192 :thinking-budget 4096})
+    (def conversation @[@{:role "user" :content "hello"}
+                        @{:role "assistant"
+                          :content @[@{:type "thinking" :thinking "" :signature "sig123"}
+                                     @{:type "text" :text "result"}]}])
+    (def body-str (openai/build-body config conversation @[]))
+    (def body (json/decode body-str))
+    (def input (body :input))
+    # Find the reasoning item
+    (var reasoning-item nil)
+    (each item input
+      (when (= (get item :type) "reasoning")
+        (set reasoning-item item)))
+    (t/assert-truthy reasoning-item)
+    (t/assert-truthy (get reasoning-item :summary))
+    # Summary must not be empty
+    (t/assert-truthy (> (length (get reasoning-item :summary)) 0))
+    (t/assert= "summary_text" (get-in reasoning-item [:summary 0 :type]))))
+
+(t/test "build-body assistant tool_use message has no summary"
+  (fn []
+    (def config @{:model "gpt-5.1" :thinking-enabled false :max-tokens 8192})
+    (def conversation @[@{:role "user" :content "run ls"}
+                        @{:role "assistant"
+                          :content @[@{:type "text" :text "I'll run that for you."}
+                                     @{:type "tool_use" :id "call_1" :name "bash"
+                                       :input @{:command "ls"}}]}])
+    (def body-str (openai/build-body config conversation @[]))
+    (def body (json/decode body-str))
+    (def input (body :input))
+    # Find all items
+    (var msg-item nil)
+    (var fc-item nil)
+    (each item input
+      (case (get item :type)
+        "message" (set msg-item item)
+        "function_call" (set fc-item item)))
+    # Message should NOT have summary
+    (t/assert-truthy msg-item)
+    (t/assert-falsy (get msg-item :summary))
+    # Function call should exist
+    (t/assert-truthy fc-item)
+    (t/assert= "bash" (get fc-item :name))))

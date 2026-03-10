@@ -157,8 +157,10 @@
           (put reasoning :encrypted_content (get block :signature)))
         # OpenAI requires a summary field on reasoning items sent back
         (def thinking-text (get block :thinking ""))
-        (when (not= "" thinking-text)
-          (put reasoning :summary @[@{:type "summary_text" :text thinking-text}]))
+        (put reasoning :summary
+          (if (not= "" thinking-text)
+            @[@{:type "summary_text" :text thinking-text}]
+            @[@{:type "summary_text" :text "(reasoning)"}]))
         (array/push results reasoning))))
 
   # Flush remaining text parts
