@@ -26,6 +26,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
+    // Capture git describe for version string (e.g. "v0.1.0-3-gabcdef" or "v0.1.0")
+    let git_describe = Command::new("git")
+        .args(&["describe", "--tags", "--always", "--dirty"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| format!("v{}", env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string())));
+
+    println!("cargo:rustc-env=GIT_DESCRIBE={}", git_describe);
+
+    // Capture build date
+    let build_date = chrono_free_date();
+    println!("cargo:rustc-env=BUILD_DATE={}", build_date);
+
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("embedded_janet.rs");
 
@@ -92,4 +113,21 @@ fn embed_directory(dir: &str, code: &mut String) -> std::io::Result<()> {
     }
     
     Ok(())
+}
+
+fn chrono_free_date() -> String {
+    // Get date without chrono dependency
+    Command::new("date")
+        .args(&["+%Y-%m-%d"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }

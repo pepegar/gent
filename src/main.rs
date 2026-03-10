@@ -101,8 +101,11 @@ fn print_help() {
 
 fn print_version() {
     let version = env!("CARGO_PKG_VERSION");
+    let git_describe = env!("GIT_DESCRIBE");
     let git_hash = env!("GIT_HASH");
-    println!("gent {} ({})", version, git_hash);
+    let build_date = env!("BUILD_DATE");
+    println!("gent {} ({} {})", version, git_hash, build_date);
+    println!("  git: {}", git_describe);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -176,6 +179,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let janet_dir_str = janet_dir.to_str().expect("janet dir path is not valid UTF-8");
     client.run(format!(
         r#"(setdyn :syspath "{janet_dir_str}")"#
+    ))?;
+
+    // Pass version info to Janet
+    let version = env!("CARGO_PKG_VERSION");
+    let git_hash = env!("GIT_HASH");
+    let git_describe = env!("GIT_DESCRIBE");
+    let build_date = env!("BUILD_DATE");
+    client.run(format!(
+        r#"(setdyn :gent/version "{version}")
+           (setdyn :gent/git-hash "{git_hash}")
+           (setdyn :gent/git-describe "{git_describe}")
+           (setdyn :gent/build-date "{build_date}")"#
     ))?;
 
     // Pass CLI flags to Janet via dynamic variables

@@ -82,3 +82,16 @@
                            (string "  api-key: " (get cfg :api-key "not set"))
                            (string "  api-key-source: " (get cfg :api-key-source "none"))])
               (string/join lines "\n"))})
+
+(commands/register "version"
+  {:description "Show gent version and build info"
+   :usage "/version"
+   :function (fn [args]
+               (def version (or (dyn :gent/version) "dev"))
+               (def git-hash (or (dyn :gent/git-hash) "unknown"))
+               (def git-describe (or (dyn :gent/git-describe) "unknown"))
+               (def build-date (or (dyn :gent/build-date) "unknown"))
+               (string/join
+                 [(string "gent " version " (" git-hash " " build-date ")")
+                  (string "  git: " git-describe)]
+                 "\n"))})

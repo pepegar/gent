@@ -292,7 +292,13 @@
 # ── Startup banner ─────────────────────────────────────────────
 
 (defn- display-banner []
-  (chat/output-info "gent — the extensible coding agent")
+  (def version-str
+    (let [v (or (dyn :gent/version) "dev")
+          h (or (dyn :gent/git-hash) "")]
+      (if (not= h "")
+        (string "gent " v " (" h ")")
+        (string "gent " v))))
+  (chat/output-info version-str)
   (chat/output-info (string "  " (length (tools/list-registered)) " tools loaded — ctrl-c to quit"))
   (def skill-list (skills/list-skills))
   (when (not (empty? skill-list))
