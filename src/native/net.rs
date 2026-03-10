@@ -187,6 +187,87 @@ fn try_extract_line(conn: &mut Connection) -> Janet {
     }
 }
 
+/// (net/write-raw conn-id data) → true or false
+/// Write a string to the connection WITHOUT appending a newline. Flushes after write.
+#[janetrs::janet_fn(arity(fix(2)))]
+fn write_raw(args: &mut [Janet]) -> Janet {
+    init_connections();
+
+    let conn_id: f64 = args[0]
+        .try_unwrap()
+        .expect("net/write-raw: conn-id must be a number");
+    let conn_id = conn_id as u64;
+
+    let data: JanetString = args[1]
+        .try_unwrap()
+        .expect("net/write-raw: data must be a string");
+
+    let mut guard = CONNECTIONS.lock().unwrap();
+    let map = match guard.as_mut() {
+        Some(m) => m,
+        None => return Janet::boolean(false),
+    };
+    let conn = match map.get_mut(&conn_id) {
+        Some(c) => c,
+        None => return Janet::boolean(false),
+    };
+
+    if conn.stream.write_all(data.as_bytes()).is_err() {
+        return Janet::boolean(false);
+    }
+    if conn.stream.flush().is_err() {
+        return Janet::boolean(false);
+    }
+
+    Janet::boolean(true)
+}
+
+/// (net/read-raw conn-id &opt max-bytes) → string or nil or :closed
+/// Non-blocking read of raw bytes from a connection. Returns up to max-bytes (default 4096).
+#[janetrs::janet_fn(arity(range(1, 2)))]
+fn read_raw(args: &mut [Janet]) -> Janet {
+    init_connections();
+
+    let conn_id: f64 = args[0]
+        .try_unwrap()
+        .expect("net/read-raw: conn-id must be a number");
+    let conn_id = conn_id as u64;
+
+    let max_bytes: usize = if args.len() > 1 && !args[1].is_nil() {
+        let n: f64 = args[1]
+            .try_unwrap()
+            .expect("net/read-raw: max-bytes must be a number");
+        n as usize
+    } else {
+        4096
+    };
+
+    let mut guard = CONNECTIONS.lock().unwrap();
+    let map = match guard.as_mut() {
+        Some(m) => m,
+        None => return Janet::from(JanetKeyword::new(b"closed")),
+    };
+    let conn = match map.get_mut(&conn_id) {
+        Some(c) => c,
+        None => return Janet::from(JanetKeyword::new(b"closed")),
+    };
+
+    // First check if there's buffered data
+    if !conn.buf.is_empty() {
+        let n = std::cmp::min(conn.buf.len(), max_bytes);
+        let data: Vec<u8> = conn.buf.drain(..n).collect();
+        return Janet::from(JanetString::new(&data));
+    }
+
+    let mut tmp = vec![0u8; max_bytes];
+    match conn.stream.read(&mut tmp) {
+        Ok(0) => Janet::from(JanetKeyword::new(b"closed")),
+        Ok(n) => Janet::from(JanetString::new(&tmp[..n])),
+        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Janet::nil(),
+        Err(_) => Janet::from(JanetKeyword::new(b"closed")),
+    }
+}
+
 /// (net/write conn-id data) → true or false
 /// Write a string followed by newline to the connection. Flushes after write.
 #[janetrs::janet_fn(arity(fix(2)))]
@@ -269,7 +350,9 @@ pub fn register(client: &mut JanetClient) {
     client.add_c_fn(CFunOptions::new(c"listen", listen_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"accept", accept_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"read-line", read_line_c).namespace(c"net"));
+    client.add_c_fn(CFunOptions::new(c"read-raw", read_raw_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"write", write_conn_c).namespace(c"net"));
+    client.add_c_fn(CFunOptions::new(c"write-raw", write_raw_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"close", close_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"close-listener", close_listener_c).namespace(c"net"));
 }

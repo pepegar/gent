@@ -285,6 +285,24 @@
   (array/push (get conn :write-buf) data)
   true)
 
+(defn- mock-net-write-raw [conn-id data]
+  (def conn (get net-connections conn-id))
+  (when (or (nil? conn) (not (get conn :open)))
+    (break false))
+  (array/push (get conn :write-buf) data)
+  true)
+
+(defn- mock-net-read-raw [conn-id &opt max-bytes]
+  (def conn (get net-connections conn-id))
+  (when (or (nil? conn) (not (get conn :open)))
+    (break :closed))
+  (def q (get net-read-queues conn-id))
+  (if (and q (not (empty? q)))
+    (do (def line (first q))
+        (array/remove q 0)
+        (if (= line :closed) :closed line))
+    nil))
+
 (defn- mock-net-close [conn-id]
   (when-let [conn (get net-connections conn-id)]
     (put conn :open false))
@@ -320,6 +338,8 @@
   (install-mock env "net/accept" mock-net-accept)
   (install-mock env "net/read-line" mock-net-read-line)
   (install-mock env "net/write" mock-net-write)
+  (install-mock env "net/write-raw" mock-net-write-raw)
+  (install-mock env "net/read-raw" mock-net-read-raw)
   (install-mock env "net/close" mock-net-close)
   (install-mock env "net/close-listener" mock-net-close-listener)
   nil)

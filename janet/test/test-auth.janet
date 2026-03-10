@@ -1,0 +1,229 @@
+# test/test-auth.janet — Tests for OpenAI OAuth provider in core/auth.
+
+(import test/helper :as t)
+(import test/fake-http :as fake)
+
+(import core/auth :as auth)
+
+(print "── test-auth ──")
+
+# ── URL encoding ─────────────────────────────────────────────────
+
+(t/test "openai-auth-url builds correct URL with all params"
+  (fn []
+    (def pkce {:verifier "test-verifier" :challenge "test-challenge"})
+    (def state "abc123def456")
+    (def url (auth/openai-auth-url pkce state))
+    (t/assert-truthy (string/has-prefix? "https://auth.openai.com/oauth/authorize?" url))
+    (t/assert-truthy (string/find "response_type=code" url))
+    (t/assert-truthy (string/find "client_id=app_EMoamEEZ73f0CkXaXp7hrann" url))
+    (t/assert-truthy (string/find "code_challenge=test-challenge" url))
+    (t/assert-truthy (string/find "code_challenge_method=S256" url))
+    (t/assert-truthy (string/find (string "state=" state) url))
+    (t/assert-truthy (string/find "codex_cli_simplified_flow=true" url))
+    (t/assert-truthy (string/find "originator=gent" url))
+    (t/assert-truthy (string/find "id_token_add_organizations=true" url))))
+
+# ── JWT decode ───────────────────────────────────────────────────
+
+(t/test "openai-decode-jwt extracts accountId from a sample JWT"
+  (fn []
+    # Construct a fake JWT with the expected claim structure
+    # Payload: {"https://api.openai.com/auth": {"chatgpt_account_id": "acct_test123"}}
+    # Base64url-encoded payload
+    (fake/set-process-handler
+      (fn [cmd args]
+        # The JWT decode calls base64 -d via shell
+        (if (and (= cmd "sh")
+                 (string/find "base64" (get args 1 "")))
+          @{:stdout `{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_test123"}}`
+            :stderr ""
+            :status 0}
+          @{:stdout "" :stderr "" :status 0})))
+
+    # Create a JWT with a valid structure (header.payload.signature)
+    # We just need the second segment to be base64url-decodable
+    (def fake-jwt "eyJhbGciOiJSUzI1NiJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdF90ZXN0MTIzIn19.signature")
+    (def account-id (auth/openai-decode-jwt fake-jwt))
+    (t/assert= "acct_test123" account-id)
+
+    (fake/set-process-handler nil)))
+
+(t/test "openai-decode-jwt returns nil for invalid JWT"
+  (fn []
+    (fake/set-process-handler
+      (fn [cmd args]
+        @{:stdout "" :stderr "error" :status 1}))
+    (def result (auth/openai-decode-jwt "not-a-jwt"))
+    (t/assert-falsy result)
+    (fake/set-process-handler nil)))
+
+# ── HTTP request parsing ─────────────────────────────────────────
+
+(t/test "openai-parse-http-request extracts code and state"
+  (fn []
+    (def raw "GET /auth/callback?code=abc123&state=xyz789 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n")
+    (def result (auth/openai-parse-http-request raw))
+    (t/assert= "abc123" (result :code))
+    (t/assert= "xyz789" (result :state))))
+
+(t/test "openai-parse-http-request returns nil for missing params"
+  (fn []
+    (def raw "GET /auth/callback HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    (def result (auth/openai-parse-http-request raw))
+    (t/assert-falsy result)))
+
+(t/test "openai-parse-http-request returns nil for non-GET"
+  (fn []
+    (def raw "POST /auth/callback?code=abc&state=xyz HTTP/1.1\r\n\r\n")
+    (def result (auth/openai-parse-http-request raw))
+    (t/assert-falsy result)))
+
+(t/test "openai-parse-http-request returns nil for nil input"
+  (fn []
+    (def result (auth/openai-parse-http-request nil))
+    (t/assert-falsy result)))
+
+# ── Token exchange (mocked HTTP) ─────────────────────────────────
+
+(t/test "openai-exchange-code sends form-encoded POST and parses response"
+  (fn []
+    (fake/set-process-handler
+      (fn [cmd args]
+        # JWT decode for accountId extraction
+        (if (and (= cmd "sh")
+                 (string/find "base64" (get args 1 "")))
+          @{:stdout `{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_abc"}}`
+            :stderr ""
+            :status 0}
+          @{:stdout "" :stderr "" :status 0})))
+
+    # Use a JWT-shaped token (header.payload.signature) so decode-jwt doesn't bail early
+    (fake/queue-request-response
+      (json/encode @{:access_token "eyJhbGciOiJSUzI1NiJ9.eyJ0ZXN0IjoidHJ1ZSJ9.sig"
+                     :refresh_token "rt_test"
+                     :expires_in 3600}))
+
+    (def pkce {:verifier "test-verifier" :challenge "test-challenge"})
+    (def cred (auth/openai-exchange-code "authcode123" pkce))
+
+    # Verify credential structure
+    (t/assert= "oauth" (get cred "type"))
+    (t/assert= "eyJhbGciOiJSUzI1NiJ9.eyJ0ZXN0IjoidHJ1ZSJ9.sig" (get cred "access"))
+    (t/assert= "rt_test" (get cred "refresh"))
+    (t/assert= "acct_abc" (get cred "accountId"))
+    (t/assert-truthy (get cred "expires"))
+
+    # Verify the request was form-encoded
+    (def req (fake/get-last-request))
+    (t/assert= "POST" (req :method))
+    (t/assert= "https://auth.openai.com/oauth/token" (req :url))
+    (t/assert= "application/x-www-form-urlencoded" (get (req :headers) "content-type"))
+    (t/assert-truthy (string/find "grant_type=authorization_code" (req :body)))
+    (t/assert-truthy (string/find "code=authcode123" (req :body)))
+    (t/assert-truthy (string/find "code_verifier=test-verifier" (req :body)))
+
+    (fake/set-process-handler nil)))
+
+# ── Token refresh (mocked HTTP) ──────────────────────────────────
+
+(t/test "openai refresh token sends form-encoded POST"
+  (fn []
+    (fake/set-process-handler
+      (fn [cmd args]
+        (if (and (= cmd "sh")
+                 (string/find "base64" (get args 1 "")))
+          @{:stdout `{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_refreshed"}}`
+            :stderr ""
+            :status 0}
+          @{:stdout "" :stderr "" :status 0})))
+
+    # Use a JWT-shaped token so decode-jwt processes it
+    (fake/queue-request-response
+      (json/encode @{:access_token "eyJhbGciOiJSUzI1NiJ9.eyJuZXciOiJ0cnVlIn0.newsig"
+                     :refresh_token "new_rt"
+                     :expires_in 7200}))
+
+    # Get the provider and call refresh directly
+    (def provider (auth/get-oauth-provider "openai"))
+    (def old-cred @{"type" "oauth"
+                    "access" "old_at"
+                    "refresh" "old_rt"
+                    "expires" 0})
+    (def new-cred ((provider :refresh) old-cred))
+
+    (t/assert= "eyJhbGciOiJSUzI1NiJ9.eyJuZXciOiJ0cnVlIn0.newsig" (get new-cred "access"))
+    (t/assert= "new_rt" (get new-cred "refresh"))
+    (t/assert= "acct_refreshed" (get new-cred "accountId"))
+
+    # Verify request was form-encoded with refresh_token grant
+    (def req (fake/get-last-request))
+    (t/assert-truthy (string/find "grant_type=refresh_token" (req :body)))
+    (t/assert-truthy (string/find "refresh_token=old_rt" (req :body)))
+
+    (fake/set-process-handler nil)))
+
+# ── Provider registration ────────────────────────────────────────
+
+(t/test "openai provider is registered"
+  (fn []
+    (def provider (auth/get-oauth-provider "openai"))
+    (t/assert-truthy provider)
+    (t/assert= "openai" (provider :id))
+    (t/assert= "OpenAI (ChatGPT Plus/Pro)" (provider :name))))
+
+(t/test "get-api-key extracts access token from openai credentials"
+  (fn []
+    (def provider (auth/get-oauth-provider "openai"))
+    (def cred @{"type" "oauth" "access" "my-token" "refresh" "rt" "expires" 999999999999})
+    (def key ((provider :get-api-key) cred))
+    (t/assert= "my-token" key)))
+
+(t/test "openai-get-account-id extracts accountId"
+  (fn []
+    (def cred @{"accountId" "acct_xyz"})
+    (t/assert= "acct_xyz" (auth/openai-get-account-id cred))))
+
+# ── Callback server polling (mocked net) ─────────────────────────
+
+(t/test "openai-poll-callback returns code on valid request"
+  (fn []
+    (fake/net-reset)
+    (def listener-id (net/listen 1455))
+
+    # Inject a connection with a valid HTTP request
+    (def request-data
+      "GET /auth/callback?code=testcode&state=teststate HTTP/1.1\r\nHost: localhost:1455\r\n\r\n")
+    (fake/net-inject-connection listener-id @[request-data])
+
+    (def code (auth/openai-poll-callback listener-id "teststate" 100))
+    (t/assert= "testcode" code)
+
+    (net/close-listener listener-id)
+    (fake/net-reset)))
+
+(t/test "openai-poll-callback returns nil on state mismatch"
+  (fn []
+    (fake/net-reset)
+    (def listener-id (net/listen 1455))
+
+    (def request-data
+      "GET /auth/callback?code=testcode&state=wrongstate HTTP/1.1\r\nHost: localhost:1455\r\n\r\n")
+    (fake/net-inject-connection listener-id @[request-data])
+
+    (def code (auth/openai-poll-callback listener-id "expected-state" 100))
+    (t/assert-falsy code)
+
+    (net/close-listener listener-id)
+    (fake/net-reset)))
+
+(t/test "openai-poll-callback returns nil when no connection"
+  (fn []
+    (fake/net-reset)
+    (def listener-id (net/listen 1455))
+
+    (def code (auth/openai-poll-callback listener-id "teststate" 100))
+    (t/assert-falsy code)
+
+    (net/close-listener listener-id)
+    (fake/net-reset)))

@@ -8,6 +8,149 @@
 
 # ── /login ─────────────────────────────────────────────────────
 
+(defn- open-browser
+  "Try to open a URL in the default browser. Fire-and-forget."
+  [url]
+  (def open-cmd
+    (let [uname-result (process/exec "uname" ["-s"])]
+      (if (= 0 (get uname-result :status))
+        (case (string/trim (get uname-result :stdout ""))
+          "Darwin" "open"
+          "xdg-open")
+        nil)))
+  (when open-cmd
+    (try
+      (process/exec "sh" ["-c" (string open-cmd " '" url "' &")])
+      ([_] nil))))
+
+(defn- login-with-callback-server
+  "Login flow using a local callback server (OpenAI-style).
+   Starts a TCP listener, opens browser, polls for callback, falls back to manual paste."
+  [provider-id provider pkce state auth-url]
+  # Try to start local callback server
+  (def listener-id
+    (try (net/listen 1455) ([_] nil)))
+
+  # Try to open browser
+  (open-browser auth-url)
+
+  (if listener-id
+    (do
+      # Poll for the callback — store state so the prompt callback can access it
+      (var code nil)
+      (var attempts 0)
+
+      (while (and (nil? code) (< attempts 120))
+        (set code (auth/openai-poll-callback listener-id state 500))
+        (++ attempts))
+
+      (net/close-listener listener-id)
+
+      (if code
+        (do
+          # Exchange code for tokens
+          (try
+            (do
+              (def credentials (auth/openai-exchange-code code pkce))
+              (auth/set-credential provider-id credentials)
+              (chat/output-info (string "✓ Logged in to " (provider :name))))
+            ([err]
+             (chat/output-error (string "Login failed: " (string err))))))
+        (do
+          # Timed out — fall back to manual prompt
+          (editor-prompt/start-prompt
+            {:label "code/url:"
+             :mask false
+             :callback
+             (fn [input]
+               (if (or (nil? input) (= "" (string/trim input)))
+                 (chat/output-info "Login cancelled — no code provided.")
+                 (try
+                   (do
+                     (var final-code nil)
+                     (if (string/has-prefix? "http" input)
+                       (do
+                         (def parsed
+                           (auth/openai-parse-http-request
+                             (string "GET " (string/trim input) " HTTP/1.1")))
+                         (when parsed
+                           (set final-code (parsed :code))))
+                       (set final-code (string/trim input)))
+                     (if final-code
+                       (do
+                         (def credentials (auth/openai-exchange-code final-code pkce))
+                         (auth/set-credential provider-id credentials)
+                         (chat/output-info (string "✓ Logged in to " (provider :name))))
+                       (chat/output-error "Could not extract authorization code from input.")))
+                   ([err]
+                    (chat/output-error (string "Login failed: " (string err)))))))}))))
+    (do
+      # Could not start server — manual paste only
+      (editor-prompt/start-prompt
+        {:label "code/url:"
+         :mask false
+         :callback
+         (fn [input]
+           (if (or (nil? input) (= "" (string/trim input)))
+             (chat/output-info "Login cancelled — no code provided.")
+             (try
+               (do
+                 (var final-code nil)
+                 (if (string/has-prefix? "http" input)
+                   (do
+                     (def parsed
+                       (auth/openai-parse-http-request
+                         (string "GET " (string/trim input) " HTTP/1.1")))
+                     (when parsed
+                       (set final-code (parsed :code))))
+                   (set final-code (string/trim input)))
+                 (if final-code
+                   (do
+                     (def credentials (auth/openai-exchange-code final-code pkce))
+                     (auth/set-credential provider-id credentials)
+                     (chat/output-info (string "✓ Logged in to " (provider :name))))
+                   (chat/output-error "Could not extract authorization code from input.")))
+               ([err]
+                (chat/output-error (string "Login failed: " (string err)))))))})))
+
+  (string "Opening browser for " (provider :name) " login...\n"
+          "\n"
+          "  " auth-url "\n"
+          "\n"
+          (if listener-id
+            "Waiting for browser callback..."
+            "After authorizing, paste the redirect URL or code below and press Enter.\n(Press Escape to cancel)")))
+
+(defn- login-with-manual-paste
+  "Login flow using manual code paste (Anthropic-style).
+   Opens browser, prompts user to paste authorization code."
+  [provider-id provider pkce auth-url]
+  # Try to open browser
+  (open-browser auth-url)
+
+  # Activate the inline prompt to collect the authorization code
+  (editor-prompt/start-prompt
+    {:label "token:"
+     :mask false
+     :callback
+     (fn [code-input]
+       (if (or (nil? code-input) (= "" (string/trim code-input)))
+         (chat/output-info "Login cancelled — no code provided.")
+         (try
+           (do
+             (def credentials (auth/anthropic-exchange-code code-input pkce))
+             (auth/set-credential provider-id credentials)
+             (chat/output-info (string "✓ Logged in to " (provider :name))))
+           ([err]
+            (chat/output-error (string "Login failed: " (string err)))))))})
+
+  (string "Opening browser for " (provider :name) " login...\n"
+          "\n"
+          "  " auth-url "\n"
+          "\n"
+          "After authorizing, paste the code below and press Enter.\n"
+          "(Press Escape to cancel)"))
+
 (commands/register "login"
   {:description "Login to an OAuth provider (e.g., /login anthropic)"
    :usage "/login [provider]"
@@ -42,47 +185,22 @@
                       "\n\nTo set an API key directly:\n"
                       "  /auth-key <provider> <key>")))
 
-     # Start the OAuth flow — generate PKCE, open browser, prompt for code
+     # Start the OAuth flow
      (try
        (do
          (def pkce (auth/generate-pkce))
-         (def url (auth/anthropic-auth-url pkce))
 
-         # Try to open browser (fire-and-forget — don't block the TUI)
-         (def open-cmd
-           (let [uname-result (process/exec "uname" ["-s"])]
-             (if (= 0 (get uname-result :status))
-               (case (string/trim (get uname-result :stdout ""))
-                 "Darwin" "open"
-                 "xdg-open")
-               nil)))
-         (when open-cmd
-           (try
-             (process/exec "sh" ["-c" (string open-cmd " '" url "' &")])
-             ([_] nil)))
+         (case provider-id
+           "openai"
+           (do
+             (def state (auth/openai-generate-state))
+             (def auth-url (auth/openai-auth-url pkce state))
+             (login-with-callback-server provider-id provider pkce state auth-url))
 
-         # Activate the inline prompt to collect the authorization code
-         (editor-prompt/start-prompt
-           {:label "token:"
-            :mask false
-            :callback
-            (fn [code-input]
-              (if (or (nil? code-input) (= "" (string/trim code-input)))
-                (chat/output-info "Login cancelled — no code provided.")
-                (try
-                  (do
-                    (def credentials (auth/anthropic-exchange-code code-input pkce))
-                    (auth/set-credential provider-id credentials)
-                    (chat/output-info (string "✓ Logged in to " (provider :name))))
-                  ([err]
-                   (chat/output-error (string "Login failed: " (string err)))))))})
-
-         (string "Opening browser for " (provider :name) " login...\n"
-                 "\n"
-                 "  " url "\n"
-                 "\n"
-                 "After authorizing, paste the code below and press Enter.\n"
-                 "(Press Escape to cancel)"))
+           # Default: Anthropic-style manual paste flow
+           (do
+             (def auth-url (auth/anthropic-auth-url pkce))
+             (login-with-manual-paste provider-id provider pkce auth-url))))
        ([err]
         (string "✗ Login setup failed: " (string err)))))})
 
