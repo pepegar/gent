@@ -1,0 +1,96 @@
+name: Nightly
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action/setup@v1
+
+      - name: Install Janet
+        uses: janet-lang/setup-janet@v1
+
+      - name: Run tests
+        run: |
+          cargo build
+          janet janet/test/run.janet
+
+      - name: Build release binary
+        run: cargo build --release --features embedded
+
+      - name: Package
+        shell: bash
+        run: |
+          cd target/release
+          tar czf ../../gent-${{ matrix.target }}.tar.gz gent
+          cd ../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gent-${{ matrix.target }}
+          path: gent-${{ matrix.target }}.tar.gz
+
+  publish:
+    name: Update nightly release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release
+          find artifacts -name '*.tar.gz' -exec mv {} release/ \;
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Update nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly (${{ github.sha }})
+          body: |
+            Automated build from `main` at ${{ github.sha }}.
+
+            Built from commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
+
+            > ⚠️ This is a development build. For stable releases, see the [latest release](https://github.com/${{ github.repository }}/releases/latest).
+          prerelease: true
+          make_latest: false
+          files: |
+            release/*.tar.gz
+            release/checksums.txt

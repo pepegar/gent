@@ -1,0 +1,61 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  - title: '🚀 Features'
+    labels:
+      - 'feature'
+  - title: '🐛 Bug Fixes'
+    labels:
+      - 'fix'
+  - title: '🧹 Maintenance'
+    labels:
+      - 'chore'
+  - title: '📖 Documentation'
+    labels:
+      - 'docs'
+
+# Auto-label commits by conventional commit prefix
+autolabeler:
+  - label: 'feature'
+    title:
+      - '/^feat(\(.+\))?[!]?:/'
+  - label: 'fix'
+    title:
+      - '/^fix(\(.+\))?[!]?:/'
+  - label: 'chore'
+    title:
+      - '/^(chore|refactor|ci|build|perf|style|test)(\(.+\))?[!]?:/'
+  - label: 'docs'
+    title:
+      - '/^docs?(\(.+\))?[!]?:/'
+
+# Works for both commits and PRs
+change-template: '- $TITLE @$AUTHOR'
+change-title-escapes: '\<*_&'
+
+# Strip the conventional commit prefix for cleaner notes
+replacers:
+  - search: '/^(feat|fix|chore|refactor|ci|build|perf|style|test|docs?)(\(.+\))?[!]?:\s*/i'
+    replace: ''
+
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'feature'
+  patch:
+    labels:
+      - 'fix'
+      - 'chore'
+      - 'docs'
+  default: patch
+
+template: |
+  ## Changes
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
