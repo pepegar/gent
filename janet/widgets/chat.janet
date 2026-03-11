@@ -1109,22 +1109,12 @@
 # ── Spinner ────────────────────────────────────────────────────
 # Spinner renders as a 3-row gentleman with top hat, monocle, and occasional smile.
 
-(def- spinner-height 3)
-(def- spinner-gent-width 6)
+(def- spinner-height 1)
+(def- spinner-gent-width 5)
 (def- spinner-frames
-  [#                hat      brim     face
-   ["  ┌─┐ " " ─┴─┴─" "  ◔_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ●‿• "]  # More smiling
-   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ◔_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ◑‿• "]  # More smiling
-   ["  ┌─┐ " " ─┴─┴─" "  ◕_• "]
-   ["  ┌─┐ " " ─┴─┴─" "  ●‿• "]  # Smiling
-   ["  ┌─┐ " " ─┴─┴─" "  ◕‿• "]  # Smiling
-   ["  ┌─┐ " " ─┴─┴─" "  ◑_• "]])
+  [" ◔_• " " ◑_• " " ◕_• " " ●‿• "
+   " ◕_• " " ◑_• " " ◔_• " " ◑‿• "
+   " ◕_• " " ●‿• " " ◕‿• " " ◑_• "])
 (def- spinner-interval 167)
 (var- spinner-state @{:active false :frame 0 :message "" :last-tick 0})
 
@@ -1778,11 +1768,9 @@
     (def style (colors :separator))
     (def y-base (+ (rect :y) (- height spinner-height)))
     (def x (rect :x))
-    # Draw hat, brim, face (3 rows)
-    (for i 0 spinner-height
-      (tui/buffer-set-string buf x (+ y-base i) (get frame i) style))
-    # Draw message next to the brim (middle row)
-    (tui/buffer-set-string buf (+ x spinner-gent-width 1) (+ y-base 1) msg style))
+    # Draw face and message on a single row
+    (tui/buffer-set-string buf x y-base frame style)
+    (tui/buffer-set-string buf (+ x spinner-gent-width 1) y-base msg style))
 
   # Streaming dirty-row optimization: when scrollback hasn't changed and
   # the visual layout is stable, only the partial line and spinner rows
