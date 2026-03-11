@@ -108,11 +108,28 @@ fi
 say "extract" "$ASSET"
 tar xzf "${TMPDIR}/${ASSET}" -C "$TMPDIR"
 
+# helper: run a command, escalating to sudo only if needed
+run_escalated() {
+  if "$@" 2>/dev/null; then
+    return 0
+  elif command -v sudo >/dev/null 2>&1; then
+    say "install" "need sudo for: $*"
+    sudo "$@"
+  else
+    err "Permission denied and sudo not available. Try: $*"
+  fi
+}
+
+# ensure install directory exists
+if [ ! -d "$INSTALL_DIR" ]; then
+  run_escalated mkdir -p "$INSTALL_DIR"
+fi
+
+# move binary into place
 if [ -w "$INSTALL_DIR" ]; then
   mv "${TMPDIR}/gent" "${INSTALL_DIR}/gent"
 else
-  say "install" "need sudo to write to $INSTALL_DIR"
-  sudo mv "${TMPDIR}/gent" "${INSTALL_DIR}/gent"
+  run_escalated mv "${TMPDIR}/gent" "${INSTALL_DIR}/gent"
 fi
 
 chmod +x "${INSTALL_DIR}/gent"
