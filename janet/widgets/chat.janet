@@ -219,6 +219,7 @@
 (var- thinking-state @{:active false :buf @"" :visible false :char-count 0})
 (var- scrollback-dirty true)
 (var- prev-y-offset -1)
+(var- prev-render-height -1)
 
 # ── Bash progress (live output) ────────────────────────────────
 # When a bash command is running and emitting :partial output, we show
@@ -237,6 +238,7 @@
   (set stream-new-vrows 0)
   (set scrollback-dirty true)
   (set prev-y-offset -1)
+  (set prev-render-height -1)
   (set mode :idle)
   (set stream-ctx nil)
   (array/clear steering-queue)
@@ -1791,7 +1793,8 @@
              (stream-state :active)
              (= scroll-offset 0)
              (not sb-dirty)
-             (= y-offset prev-y-offset))
+             (= y-offset prev-y-offset)
+             (= render-height prev-render-height))
     (def dr (buf :dirty-rows))
     (def dr-len (length dr))
     (for i 0 dr-len (put dr i false))
@@ -1803,7 +1806,8 @@
       (def spinner-start (- height spinner-height))
       (for i spinner-start height
         (when (< i dr-len) (put dr i true)))))
-  (set prev-y-offset y-offset))
+  (set prev-y-offset y-offset)
+  (set prev-render-height render-height))
 
 # ── Widget constructor ─────────────────────────────────────────
 
