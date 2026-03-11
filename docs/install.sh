@@ -49,7 +49,7 @@ esac
 
 case "$OS" in
   Darwin) TARGET="${ARCH}-apple-darwin" ;;
-  Linux)  TARGET="${ARCH}-unknown-linux-gnu" ;;
+  Linux)  TARGET="${ARCH}-unknown-linux-musl" ;;
 esac
 
 ASSET="gent-${TARGET}.tar.gz"

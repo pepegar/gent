@@ -21,7 +21,9 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-14
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
 
     steps:
@@ -29,12 +31,22 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            cargo install cross --git https://github.com/cross-rs/cross
+          fi
 
       - name: Install Janet
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y libssl-dev
             git clone --depth 1 --branch v1.37.1 https://github.com/janet-lang/janet.git /tmp/janet
             cd /tmp/janet && make -j$(nproc) && sudo make install
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
@@ -42,19 +54,26 @@ jobs:
           fi
 
       - name: Run tests
+        if: matrix.target != 'aarch64-unknown-linux-musl'
         run: |
           cargo build
           janet janet/test/run.janet
 
       - name: Build release binary
-        run: cargo build --release --features embedded
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            cross build --release --features embedded --target ${{ matrix.target }}
+          else
+            cargo build --release --features embedded --target ${{ matrix.target }}
+          fi
 
       - name: Package
         shell: bash
         run: |
-          cd target/release
-          tar czf ../../gent-${{ matrix.target }}.tar.gz gent
-          cd ../..
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../gent-${{ matrix.target }}.tar.gz gent
+          cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
