@@ -12,6 +12,10 @@
       url = "github:eraserhd/parinfer-rust";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    tui-wright = {
+      url = "github:pepegar/tui-wright";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -20,6 +24,7 @@
     flake-utils,
     rust-overlay,
     parinfer-rust,
+    tui-wright,
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       overlays = [(import rust-overlay)];
@@ -136,6 +141,7 @@
           ++ buildInputs
           ++ [
             parinfer-rust.packages.${system}.default
+            tui-wright.packages.${system}.default
           ]
           ++ (with pkgs; [
             # Additional development tools
