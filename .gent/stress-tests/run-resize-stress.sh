@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Resize stress test: rapidly change terminal dimensions during streaming
 
-PROJECT="/Users/pepe/projects/github.com/pepegar/gent"
+PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 STRESS_DIR="$PROJECT/.gent/stress-tests"
 RESULTS_DIR="$PROJECT/.gent/stress-results"
 GENT_BIN="$PROJECT/target/debug/gent"
