@@ -416,7 +416,11 @@
         (def cend (min (+ ci char-len) (length text)))
         (def ch (string/slice text ci cend))
         (def w (tui/char-width ch))
-        (when (> w 0)
+        (if (= w 0)
+          # Zero-width char: append to previous cell
+          (when (> (length row) 0)
+            (def prev (last row))
+            (put prev :text (string (prev :text) ch)))
           (if (> (+ col w 1) width)
             (do
               # Not enough room for this char + ellipsis; truncate here
@@ -478,9 +482,13 @@
         (def overflow (array/slice current-row (+ break-idx 1)))
         (array/push rows keep)
         (array/clear current-row)
+        (set col 0)
         (pad-continuation)
         (array/concat current-row overflow)
-        (set col (+ col (length overflow))))
+        (var overflow-width 0)
+        (each s overflow
+          (+= overflow-width (tui/char-width (s :text))))
+        (set col (+ col overflow-width)))
       # No space found — hard break at width
       (do
         (flush-row)
@@ -501,11 +509,18 @@
           (def cend (min (+ ci char-len) (length text)))
           (def ch (string/slice text ci cend))
           (def w (tui/char-width ch))
-          (when (and (> w 0) (> (+ col w) width))
-            (word-wrap-flush))
-          (when (> w 0)
-            (array/push current-row @{:text ch :style style})
-            (+= col w))
+          (if (= w 0)
+            # Zero-width char (combining mark, variation selector, ZWJ, etc.)
+            # Append to the previous cell's text so the terminal renders them
+            # together with the base character.
+            (when (> (length current-row) 0)
+              (def prev (last current-row))
+              (put prev :text (string (prev :text) ch)))
+            (do
+              (when (> (+ col w) width)
+                (word-wrap-flush))
+              (array/push current-row @{:text ch :style style})
+              (+= col w)))
           (set ci cend)))))
 
   (if (line :spans)
@@ -602,7 +617,7 @@
   (def new-line @{:spans spans})
   # Auto-detect wrap indent: first span of multi-span lines is the label prefix
   (when (and (> (length spans) 1) (get (first spans) :text))
-    (put new-line :wrap-indent (length ((first spans) :text))))
+    (put new-line :wrap-indent (tui/string-width ((first spans) :text))))
   (array/push scrollback new-line)
   (set scrollback-dirty true)
   (when (> cached-vrows-width 0)
@@ -1527,6 +1542,61 @@
       # We have tool_use blocks without results - rollback the incomplete message
       (conv/rollback 1))))
 
+# ── Session replay ─────────────────────────────────────────────
+
+(defn rebuild-from-messages
+  "Rebuild the chat scrollback from the current conversation messages.
+   Clears existing scrollback and replays each message through output functions."
+  []
+  (reset-state)
+  # Build a lookup of tool_use_id → tool_result for pairing
+  (def messages (conv/get-messages))
+  (def tool-results @{})
+  (each msg messages
+    (def content (get msg :content))
+    (when (and (= "user" (get msg :role)) (not (string? content)))
+      (each block content
+        (when (= "tool_result" (get block :type))
+          (put tool-results (get block :tool_use_id) block)))))
+  # Replay messages
+  (each msg messages
+    (def role (get msg :role))
+    (def content (get msg :content))
+    (cond
+      # User text message
+      (and (= role "user") (string? content))
+      (when (not (string/has-prefix? "[context]" content))
+        (output-user content))
+      # User tool results — already rendered inline with tool calls above
+      (and (= role "user") (not (string? content)))
+      nil
+      # Assistant message
+      (= role "assistant")
+      (do
+        (if (string? content)
+          # Simple text response
+          (output-agent (string content "\n"))
+          # Complex content with text, tool_use, thinking blocks
+          (do
+            # Collect text blocks and render as agent output
+            (def text-parts @[])
+            (each block content
+              (when (= "text" (get block :type))
+                (array/push text-parts (get block :text ""))))
+            (when (not (empty? text-parts))
+              (output-agent (string (string/join text-parts "\n") "\n")))
+            # Render tool calls with their results
+            (each block content
+              (when (= "tool_use" (get block :type))
+                (def name (get block :name ""))
+                (def input (get block :input @{}))
+                (render-tool-call name input)
+                # Find and render the corresponding result
+                (def result-block (get tool-results (get block :id)))
+                (when result-block
+                  (def result-content (get result-block :content ""))
+                  (render-tool-result name result-content))))))))))
+
 # ── Public API ─────────────────────────────────────────────────
 
 (defn active? []
@@ -1734,7 +1804,7 @@
       (when (= w 2)
         (when (< (+ col 1) row-end)
           (tui/buffer-set-char buf (+ col 1) y "" (cell :style))))
-      (+= col (if (> w 0) w 1)))
+      (+= col (max w 1)))
     (when rs
       (def gutter-color
         (cond

@@ -3,6 +3,7 @@
 
 (import core/commands :as commands)
 (import core/conversation :as conv)
+(import core/sessions-explorer :as sessions-explorer)
 
 (commands/register "help"
   {:description "Show available commands"
@@ -24,35 +25,11 @@
                       "Tokens (est): ~" (conv/estimate-tokens)))})
 
 (commands/register "sessions"
-  {:description "List all sessions for this project"
+  {:description "Open interactive sessions explorer"
    :usage "/sessions"
    :function (fn [args]
-              (def sessions (conv/list-sessions))
-              (if (empty? sessions)
-                "No sessions found."
-                (do
-                  (def current (conv/get-session-id))
-                  (def lines @["Sessions (chronological order):"])
-                  (each s sessions
-                    (def marker (if (= s current) " (current)" ""))
-                    # Parse timestamp from session ID for better display
-                    (if (string/has-prefix? s "20")
-                      (do
-                        (def parts (string/split "-" s))
-                        (when (>= (length parts) 3)
-                          (def date-part (get parts 0))
-                          (def time-part (get parts 1))
-                          (def counter-part (get parts 2))
-                          (def date-str (string (string/slice date-part 0 4) "/"
-                                               (string/slice date-part 4 6) "/"
-                                               (string/slice date-part 6 8)))
-                          (def time-str (string (string/slice time-part 0 2) ":"
-                                               (string/slice time-part 2 4) ":"
-                                               (string/slice time-part 4 6)))
-                          (array/push lines (string "  " s " — " date-str " " time-str marker))))
-                      # Fallback for old random session IDs
-                      (array/push lines (string "  " s marker))))
-                  (string/join lines "\n"))))})
+              (sessions-explorer/open)
+              "")})
 
 (commands/register "resume"
   {:description "Resume a previous session"

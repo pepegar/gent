@@ -109,8 +109,20 @@
         (def ch (string/slice text i end))
         (def w (char-width ch))
         (if (= w 0)
-          # Zero-width char: skip without advancing column
-          (set i end)
+          (do
+            # Zero-width char (combining mark, variation selector, etc.):
+            # Append to the previous visible cell so the terminal renders them together.
+            # For wide chars, the previous visible cell might be 2 columns back (skip continuation).
+            (when (> col x)
+              (var prev-col (- col 1))
+              (var prev-cell (get (buf :cells) (buf-idx buf prev-col y)))
+              (when (and prev-cell (= (prev-cell :ch) "") (> prev-col x))
+                # Hit a wide-char continuation cell — go one more back to the base char
+                (set prev-col (- prev-col 1))
+                (set prev-cell (get (buf :cells) (buf-idx buf prev-col y))))
+              (when prev-cell
+                (put prev-cell :ch (string (prev-cell :ch) ch))))
+            (set i end))
           (do
             # Check if char fits (wide chars need 2 columns)
             (when (> (+ col w) right) (break))

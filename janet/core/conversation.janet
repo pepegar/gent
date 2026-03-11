@@ -113,6 +113,25 @@
   (when history-path
     (spit history-path (string (string/format "%j" msg) "\n") :a)))
 
+(defn- write-meta
+  "Write session metadata to the meta file."
+  [dir meta]
+  (spit (string dir "/meta") (string/format "%j" meta)))
+
+(defn read-session-meta
+  "Read metadata for a session. Returns nil for sessions without meta."
+  [sid]
+  (def path (string (project-sessions-dir) "/" sid "/meta"))
+  (if (os/stat path)
+    (do
+      (def content (slurp path))
+      (def p (parser/new))
+      (parser/consume p content)
+      (if (parser/has-more p)
+        (parser/produce p)
+        nil))
+    nil))
+
 (defn load-history
   "Load messages from a history file using Janet's parser."
   [path]
@@ -137,6 +156,7 @@
   (set history-path (string session-dir "/history"))
   # Create empty history file
   (spit history-path "")
+  (write-meta session-dir {:parent nil :fork-point nil :created-at (os/time)})
   (set messages @[])
   (set parent-session-id nil)
   sid)
@@ -187,8 +207,44 @@
   []
   (def dir (project-sessions-dir))
   (if (os/stat dir)
-    (sort (os/dir dir))
+    (reverse (sort (filter |(not (string/has-prefix? "." $)) (os/dir dir))))
     @[]))
+
+(defn count-session-messages
+  "Count messages in a session by counting lines in its history file."
+  [sid]
+  (def path (string (project-sessions-dir) "/" sid "/history"))
+  (if (os/stat path)
+    (do
+      (def content (slurp path))
+      (if (= "" content) 0
+        (len (filter |(not= "" $) (string/split "\n" content)))))
+    0))
+
+(defn list-sessions-with-meta
+  "List all sessions with metadata and message counts."
+  []
+  (def sessions (list-sessions))
+  (map (fn [sid]
+        @{:id sid
+          :meta (or (read-session-meta sid) @{:parent nil :fork-point nil})
+          :message-count (count-session-messages sid)})
+    sessions))
+
+(defn build-session-tree
+  "Build a tree from session list. Returns array of root nodes.
+   Each node: @{:id :meta :message-count :children @[...]}"
+  [sessions-with-meta]
+  (def by-id @{})
+  (each s sessions-with-meta
+    (put by-id (s :id) (merge s @{:children @[]})))
+  (def roots @[])
+  (each s sessions-with-meta
+    (def parent-id (get-in s [:meta :parent]))
+    (if (and parent-id (get by-id parent-id))
+      (array/push ((get by-id parent-id) :children) (get by-id (s :id)))
+      (array/push roots (get by-id (s :id)))))
+  roots)
 
 (defn resume
   "Load a previous session's history and switch to it."
@@ -238,6 +294,8 @@
     (if (os/stat old-history)
       (spit new-path (slurp old-history))
       (spit new-path "")))
+  (def fork-point (len messages))
+  (write-meta new-dir {:parent old-sid :fork-point fork-point :created-at (os/time)})
   (set parent-session-id old-sid)
   (set session-id new-sid)
   (set session-dir new-dir)
@@ -255,6 +313,39 @@
   (def pid parent-session-id)
   (set parent-session-id nil)
   pid)
+
+(defn fork-from-session
+  "Fork from an arbitrary session at an optional message index.
+   Creates a new session with the source history (truncated at msg-index if given),
+   writes metadata, and switches to the new session."
+  [source-sid &opt msg-index]
+  (def source-dir (string (project-sessions-dir) "/" source-sid))
+  (def source-history (string source-dir "/history"))
+  (unless (os/stat source-history)
+    (error (string "session not found: " source-sid)))
+  (def source-messages (load-history source-history))
+  (def fork-messages
+    (if msg-index
+      (array/slice source-messages 0 (min msg-index (len source-messages)))
+      source-messages))
+  (def new-sid (timestamp-session-id))
+  (def new-dir (string (project-sessions-dir) "/" new-sid))
+  (ensure-dir new-dir)
+  (def new-path (string new-dir "/history"))
+  (spit new-path "")
+  (each msg fork-messages
+    (spit new-path (string (string/format "%j" msg) "\n") :a))
+  (write-meta new-dir
+    {:parent source-sid
+     :fork-point (len fork-messages)
+     :created-at (os/time)})
+  (set parent-session-id source-sid)
+  (set session-id new-sid)
+  (set session-dir new-dir)
+  (set history-path new-path)
+  (set messages (array/slice fork-messages))
+  (hooks/run :session-fork source-sid new-sid)
+  new-sid)
 
 # ── Context Window Helpers ─────────────────────────────────────
 

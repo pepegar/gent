@@ -11,6 +11,7 @@
 (import widgets/editor_new :as ed)
 (import core/completion :as completion)
 (import core/dialog :as dialog)
+(import core/sessions-explorer :as sessions-explorer)
 (import core/input-history :as ih)
 (import core/widget :as widget)
 (import tui)
@@ -193,6 +194,12 @@
              (def ctrl (get event :ctrl false))
              (def alt (get event :alt false))
              (def shift (get event :shift false))
+
+      # ── Sessions explorer key interception ─────────────────
+      # When the sessions explorer is active, route keys to it.
+             (when (sessions-explorer/active?)
+               (sessions-explorer/handle-key event)
+               (break nil))
 
       # ── Dialog key interception ───────────────────────────
       # When a dialog is active, all keys go to the dialog.
