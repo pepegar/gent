@@ -30,6 +30,29 @@
   []
   (sort (keys store)))
 
+(defn push
+  "Append a value to an array-valued register. Creates the array if needed.
+   Use this to build a message queue in a register."
+  [name value]
+  (def arr (tget store name))
+  (if (array? arr)
+    (array/push arr value)
+    (put store name @[value]))
+  value)
+
+(defn drain
+  "Return a copy of an array register's contents and clear it.
+   Returns an empty array if the register is missing or not an array.
+   Use this to consume all queued messages atomically."
+  [name]
+  (def arr (tget store name))
+  (if (array? arr)
+    (do
+      (def result (array/slice arr))
+      (array/clear arr)
+      result)
+    @[]))
+
 (defn clear
   "Remove a register, or clear all if no name given."
   [&opt name]
