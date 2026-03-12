@@ -16,6 +16,7 @@
 (import core/agents-md :as agents-md)
 (import core/skills :as skills)
 (import core/widget :as widget)
+(import core/registers :as reg)
 (import tui)
 (import tui/markdown :as md)
 (import tui/ansi :as ansi)
@@ -240,6 +241,7 @@
   (set stream-ctx nil)
   (array/clear steering-queue)
   (array/clear followup-queue)
+  (reg/clear :steering)
   (buffer/clear (thinking-state :buf))
   (put thinking-state :active false)
   (put thinking-state :visible false)
@@ -1394,6 +1396,11 @@
      (enter-idle))))
 
 (defn- process-steering-or-idle []
+  # Drain the :steering register inbox into the local queue so that
+  # external callers (other agents, RPC, eval_janet) can steer by pushing
+  # to (reg/push :steering "message").
+  (each msg (reg/drain :steering)
+    (array/push steering-queue msg))
   (if (not (empty? steering-queue))
     (do
       (def steer-msg (string/join steering-queue "\n"))
@@ -1570,6 +1577,7 @@
       (when (and response (get response :content))
         (conv/push {:role "assistant" :content (get response :content)}))
       (array/clear followup-queue)
+      (reg/clear :steering)
       (enter-idle)
       (widget/mark-dirty :editor))
     (= mode :tools)
@@ -1583,6 +1591,7 @@
       (output-info "— tools cancelled —")
       (array/clear steering-queue)
       (array/clear followup-queue)
+      (reg/clear :steering)
       (enter-idle)
       (widget/mark-dirty :editor))))
 
@@ -1597,6 +1606,21 @@
     (spinner-stop)))
 
 (defn tick []
+  # Mailbox: when idle, drain the :steering register to start a new turn.
+  # This lets external code (other agents, eval_janet) send messages by
+  # pushing to (reg/push :steering "message") without user interaction.
+  (when (= mode :idle)
+    (def inbox (reg/drain :steering))
+    (when (not (empty? inbox))
+      (def msg (string/join inbox "\n"))
+      (output-user msg)
+      (conv/push {:role "user" :content msg})
+      (def effective-prompt (build-effective-prompt))
+      (try
+        (start-streaming (conv/get-messages) effective-prompt)
+        ([err]
+         (hooks/run :on-error err)
+         (output-error (string err))))))
   (when (= mode :streaming)
     (spinner-tick)
     (def drain-result (drain-stream))

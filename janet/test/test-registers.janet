@@ -34,5 +34,39 @@
 (t/test "set returns value" (fn []
                              (t/assert= (reg/set :ret-test 42) 42)))
 
+(t/test "push creates array on first use" (fn []
+                                            (reg/clear :push-new)
+                                            (reg/push :push-new "a")
+                                            (t/assert= (reg/get :push-new) @["a"])))
+
+(t/test "push appends to existing array" (fn []
+                                           (reg/clear :push-append)
+                                           (reg/push :push-append "x")
+                                           (reg/push :push-append "y")
+                                           (reg/push :push-append "z")
+                                           (t/assert= (reg/get :push-append) @["x" "y" "z"])))
+
+(t/test "push returns the pushed value" (fn []
+                                          (reg/clear :push-ret)
+                                          (t/assert= (reg/push :push-ret 99) 99)))
+
+(t/test "drain returns all items and clears" (fn []
+                                               (reg/clear :drain-test)
+                                               (reg/push :drain-test "m1")
+                                               (reg/push :drain-test "m2")
+                                               (def result (reg/drain :drain-test))
+                                               (t/assert= result @["m1" "m2"])
+                                               (t/assert= (reg/get :drain-test) @[])))
+
+(t/test "drain on missing register returns empty array" (fn []
+                                                          (reg/clear :drain-missing)
+                                                          (t/assert= (reg/drain :drain-missing) @[])))
+
+(t/test "drain is atomic: subsequent drain is empty" (fn []
+                                                       (reg/clear :drain-atomic)
+                                                       (reg/push :drain-atomic "once")
+                                                       (reg/drain :drain-atomic)
+                                                       (t/assert= (reg/drain :drain-atomic) @[])))
+
 (def pass (t/pass))
 (def fail (t/fail))
