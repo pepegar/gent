@@ -9,7 +9,7 @@ set -euo pipefail
 #   cols: terminal width (default 100)
 #   rows: terminal height (default 30)
 
-PROJECT="/Users/pepe/projects/github.com/pepegar/gent"
+PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 STRESS_DIR="$PROJECT/.gent/stress-tests"
 RESULTS_DIR="$PROJECT/.gent/stress-results"
 GENT_BIN="$PROJECT/target/debug/gent"
