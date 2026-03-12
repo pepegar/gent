@@ -20,8 +20,10 @@ GENT="$PROJECT/target/debug/gent"
 COLS=100
 ROWS=30
 
-# render:frame avg must stay under this threshold (ms) to pass
-FRAME_TIME_LIMIT=16
+# render:frame avg must stay under this threshold (ms) to pass.
+# Override via env: FRAME_TIME_LIMIT=100 bash test/tui-wright-profile.sh
+# CI sets this to 100ms (generous on shared runners); dev default is 16ms.
+FRAME_TIME_LIMIT="${FRAME_TIME_LIMIT:-16}"
 
 PASS=0
 FAIL=0

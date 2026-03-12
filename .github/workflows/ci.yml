@@ -40,3 +40,22 @@ jobs:
 
       - name: Rust tests
         run: cargo test
+
+      - name: Cache tui-wright binary
+        uses: actions/cache@v4
+        id: cache-tui-wright
+        with:
+          path: ~/.cargo/bin/tui-wright
+          key: tui-wright-${{ runner.os }}-f565303f
+
+      - name: Install tui-wright
+        if: steps.cache-tui-wright.outputs.cache-hit != 'true'
+        run: cargo install --git https://github.com/pepegar/tui-wright --rev f565303f0af6115a403f9b600a97f50cc59ef3dd
+
+      - name: Integration tests (tui-wright)
+        env:
+          FRAME_TIME_LIMIT: "100"
+        run: |
+          bash test/tui-wright-focus.sh
+          bash test/tui-wright-model.sh
+          bash test/tui-wright-profile.sh
