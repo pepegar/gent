@@ -95,7 +95,42 @@
   (import core/registers :as reg)
   (reg/set :my-data "saved for later")
   (reg/get :my-data)
+  (reg/list)   # see all register names
   ```
+
+  ### Use registers as working memory
+
+  Registers are a persistent scratchpad across all tool calls in a session. Use them
+  to track progress on multi-step tasks — don't rely on the conversation alone.
+
+  **When tackling a task with 3+ steps, write a plan to `:plan` first, then work through it.**
+
+  ```janet
+  (import core/registers :as reg)
+
+  # Start of a complex task: write a plan
+  (reg/set :plan @["read Cargo.toml" "run failing tests" "find root cause" "fix" "verify"])
+  (reg/set :done @[])
+  ```
+
+  After each step, pop from `:plan` and push to `:done`:
+
+  ```janet
+  (import core/registers :as reg)
+  (def plan (reg/get :plan))
+  (def done (reg/get :done))
+  (array/push done (first plan))
+  (reg/set :plan (array/slice plan 1))
+  (reg/set :done done)
+  # inspect: [(reg/get :done) (reg/get :plan)]
+  ```
+
+  Common patterns:
+  - **Todo list**: `:plan` / `:done` arrays updated as steps complete
+  - **Scratchpad**: stash file contents, grep output, or computed values to reference later
+  - **Counters**: track files changed, errors found, tests fixed
+  - **Flags**: `(reg/set :config-reviewed false)` at start, flip when done
+  - **Intermediate results**: save output of one tool call for use several steps later
 
   ### Add hooks to change your own behavior
 
