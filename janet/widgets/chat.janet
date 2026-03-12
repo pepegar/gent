@@ -1577,6 +1577,7 @@
       (when (and response (get response :content))
         (conv/push {:role "assistant" :content (get response :content)}))
       (array/clear followup-queue)
+      (reg/clear :steering)
       (enter-idle)
       (widget/mark-dirty :editor))
     (= mode :tools)
