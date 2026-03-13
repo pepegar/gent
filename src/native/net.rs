@@ -306,6 +306,46 @@ fn write_conn(args: &mut [Janet]) -> Janet {
     Janet::boolean(true)
 }
 
+/// (net/connect host port) → conn-id (number) or nil
+/// Connect to a TCP server. Returns a numeric connection ID, or nil on failure.
+#[janetrs::janet_fn(arity(fix(2)))]
+fn connect(args: &mut [Janet]) -> Janet {
+    init_connections();
+
+    let host: JanetString = args[0]
+        .try_unwrap()
+        .expect("net/connect: host must be a string");
+    let port: f64 = args[1]
+        .try_unwrap()
+        .expect("net/connect: port must be a number");
+    let port = port as u16;
+
+    let addr = format!("{}:{}", std::str::from_utf8(host.as_bytes()).unwrap_or("127.0.0.1"), port);
+    match TcpStream::connect(&addr) {
+        Ok(stream) => {
+            stream
+                .set_nonblocking(true)
+                .expect("net/connect: failed to set non-blocking");
+            let conn_id = NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst);
+            let mut guard = CONNECTIONS.lock().unwrap();
+            if let Some(ref mut map) = *guard {
+                map.insert(
+                    conn_id,
+                    Connection {
+                        stream,
+                        buf: Vec::new(),
+                    },
+                );
+            }
+            Janet::number(conn_id as f64)
+        }
+        Err(e) => {
+            eprintln!("net/connect: failed to connect to {}: {}", addr, e);
+            Janet::nil()
+        }
+    }
+}
+
 /// (net/close conn-id) → nil
 /// Close a connection and remove from registry.
 #[janetrs::janet_fn(arity(fix(1)))]
@@ -347,6 +387,7 @@ fn close_listener(args: &mut [Janet]) -> Janet {
 // ── Registration ────────────────────────────────────────────────
 
 pub fn register(client: &mut JanetClient) {
+    client.add_c_fn(CFunOptions::new(c"connect", connect_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"listen", listen_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"accept", accept_c).namespace(c"net"));
     client.add_c_fn(CFunOptions::new(c"read-line", read_line_c).namespace(c"net"));
