@@ -12,6 +12,34 @@
     (string/has-prefix? "claude-" model-name) "anthropic"
     nil))
 
+(defn- list-models-output []
+  (def cfg (api/get-config))
+  (def current-model (get cfg :model))
+  (def models
+    (try
+      (api/list-models)
+      ([err] nil)))
+  (def lines @[])
+  (cond
+    (nil? models)
+    (array/push lines "Failed to fetch models. Check your API key and network connection.")
+
+    (empty? models)
+    (array/push lines "No models returned by the API.")
+
+    (do
+      (def sorted (sort-by |(get $ :id) models))
+      (array/push lines "Available models:")
+      (each m sorted
+        (def id (get m :id))
+        (def display (get m :display_name))
+        (def marker (if (= id current-model) " *" ""))
+        (if display
+          (array/push lines (string "  " id " — " display marker))
+          (array/push lines (string "  " id marker))))))
+  (array/push lines (string "\nCurrent: " current-model))
+  (string/join lines "\n"))
+
 (commands/register "model"
   {:description "List available models or switch to a model"
    :usage "/model [name]"
@@ -31,26 +59,4 @@
              (string " (switched provider to " target-provider ")")
              ""))
          (string "Switched to model: " name switched-msg))
-       (do
-         (def cfg (api/get-config))
-         (def current-model (get cfg :model))
-         (def models (api/list-models))
-         (cond
-           (nil? models)
-           "Failed to fetch models. Check your API key and network connection."
-
-           (empty? models)
-           "No models returned by the API."
-
-           (do
-             (def sorted (sort-by |(get $ :id) models))
-             (def lines @["Available models:"])
-             (each m sorted
-               (def id (get m :id))
-               (def display (get m :display_name))
-               (def marker (if (= id current-model) " *" ""))
-               (if display
-                 (array/push lines (string "  " id " — " display marker))
-                 (array/push lines (string "  " id marker))))
-             (array/push lines (string "\nCurrent: " current-model))
-             (string/join lines "\n"))))))})
+       (list-models-output)))})
