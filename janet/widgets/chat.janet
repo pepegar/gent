@@ -412,74 +412,14 @@
 # ── Visual row expansion ──────────────────────────────────────
 # These must be defined before push-line (which uses count-visual-rows).
 
-(defn- line-has-box-drawing?
-  "Check if a line contains box-drawing characters (table borders).
-   Box-drawing chars: │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ─"
-  [line]
-  (def texts
-    (if (line :spans)
-      (map |($ :text) (line :spans))
-      @[(or (line :text) "")]))
-  (var found false)
-  (each text texts
-    (when (not found)
-      (each ch ["│" "┌" "┐" "└" "┘" "├" "┤" "┬" "┴" "┼" "─"]
-        (when (and (not found) (string/find ch text))
-          (set found true)))))
-  found)
-
-(defn- truncate-line-to-width
-  "Truncate a line's spans to fit within width columns, appending ellipsis if truncated.
-   Returns a single visual row (array of {:text :style} spans)."
-  [line width]
-  (def row @[])
-  (var col 0)
-  (def all-spans
-    (if (line :spans)
-      (line :spans)
-      @[@{:text (or (line :text) "") :style (or (line :style) (tui/style))}]))
-  (var truncated false)
-  (each span all-spans
-    (when (not truncated)
-      (def text (span :text))
-      (def st (or (span :style) (tui/style)))
-      (var ci 0)
-      (while (and (< ci (length text)) (not truncated))
-        (def byte (get text ci))
-        (def char-len
-          (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
-        (def cend (min (+ ci char-len) (length text)))
-        (def ch (string/slice text ci cend))
-        (def w (tui/char-width ch))
-        (if (= w 0)
-          # Zero-width char: append to previous cell
-          (when (> (length row) 0)
-            (def prev (last row))
-            (put prev :text (string (prev :text) ch)))
-          (if (> (+ col w 1) width)
-            (do
-              # Not enough room for this char + ellipsis; truncate here
-              (array/push row @{:text "\xE2\x80\xA6" :style st})
-              (set truncated true))
-            (do
-              (array/push row @{:text ch :style st})
-              (+= col w))))
-        (set ci cend))))
-  (if (= 0 (length row)) @[] @[row]))
-
 (defn- line-to-visual-rows
   "Convert a scrollback line into an array of visual rows.
    Each visual row is an array of {:text :style} spans that fit within width.
    Lines that exceed width wrap at word boundaries (spaces) when possible,
    falling back to hard character breaks for long words.
-   Table lines (containing box-drawing characters) are truncated with ellipsis
-   instead of wrapped to preserve table structure.
    Continuation rows are indented by :wrap-indent spaces (auto-detected from
    the first span of span-based lines)."
   [line width]
-  # Table lines: truncate instead of wrapping to preserve table structure
-  (when (line-has-box-drawing? line)
-    (break (truncate-line-to-width line width)))
 
   (def rows @[])
   (var current-row @[])
@@ -601,6 +541,24 @@
    Lines with a :row-style get a gutter column, so their content is 1 char narrower."
   [line width]
   (if (line :row-style) (- width 1) width))
+
+(defn- get-chat-content-width []
+  "Return the available width for table content inside the chat widget.
+   Uses the inner content rect (after borders) when available, otherwise
+   falls back to the widget rect minus 2 for the standard chat border.
+   Subtracts gutter (1) and prefix (9) since agent tables appear after
+   the '   gent: ' prefix."
+  (def w (widget/get-widget :chat))
+  (def cr (if w (w :content-rect) nil))
+  (def raw
+    (if (and cr (cr :width))
+      (cr :width)
+      (if (and w (w :rect))
+        # Approximate: outer rect minus 2 for the standard chat border
+        (- ((w :rect) :width) 2)
+        80)))
+  # Agent lines have :row-style (gutter=1) + prefix '         ' (9 cols)
+  (- raw 10))
 
 (defn- total-visual-rows
   "Cached total visual rows. Recomputes on width change."
@@ -758,6 +716,7 @@
   "Add agent response to scrollback with markdown styling."
   (when (> (length scrollback) 0) (push-line ""))
   (var first true)
+  (def max-w (get-chat-content-width))
   (def parser
     (md/create-chat-markdown-parser
       (fn [spans]
@@ -767,7 +726,8 @@
                 (array/concat @[@{:text "   gent: " :style (colors :agent-label)}] spans))
             (array/concat @[@{:text "         " :style (tui/style)}] spans)))
         (push-raw-line prefixed)
-        (put (last scrollback) :row-style :agent-row-bg))))
+        (put (last scrollback) :row-style :agent-row-bg))
+      max-w))
   ((parser :feed) lines)
   ((parser :finish))
   (push-line ""))
@@ -1124,6 +1084,7 @@
   (put stream-state :active true)
   (put stream-state :first true)
   (buffer/clear (stream-state :line-buf))
+  (def max-w (get-chat-content-width))
   (def parser
     (md/create-chat-markdown-parser
       (fn [spans]
@@ -1133,7 +1094,8 @@
                 (array/concat @[@{:text "   gent: " :style (colors :agent-label)}] spans))
             (array/concat @[@{:text "         " :style (tui/style)}] spans)))
         (push-raw-line prefixed)
-        (put (last scrollback) :row-style :agent-row-bg))))
+        (put (last scrollback) :row-style :agent-row-bg))
+      max-w))
   (put stream-state :parser parser))
 
 (defn- stream-delta [text]

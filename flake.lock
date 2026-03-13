@@ -78,7 +78,8 @@
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "parinfer-rust": "parinfer-rust",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "tui-wright": "tui-wright"
       }
     },
     "rust-overlay": {
@@ -128,6 +129,26 @@
       "original": {
         "owner": "nix-systems",
         "repo": "default",
+        "type": "github"
+      }
+    },
+    "tui-wright": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1772813272,
+        "narHash": "sha256-/yoQWEHIZgb80OZKQv7K17ux8LsMDbvKhly/tAeubYc=",
+        "owner": "pepegar",
+        "repo": "tui-wright",
+        "rev": "f565303f0af6115a403f9b600a97f50cc59ef3dd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pepegar",
+        "repo": "tui-wright",
         "type": "github"
       }
     }

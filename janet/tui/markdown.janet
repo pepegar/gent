@@ -268,6 +268,151 @@
         (put widths c w))))
   widths)
 
+(defn- total-table-width [widths]
+  "Compute the total display width of a table given column widths.
+   Accounts for borders (ncols+1 │ chars) and padding (2 spaces per cell)."
+  (var total (+ (length widths) 1))
+  (each w widths (+= total (+ w 2)))
+  total)
+
+(def- min-col-width 4)
+
+(defn- constrain-col-widths [widths max-width]
+  "Shrink column widths so the table fits within max-width.
+   Each column gets at least min-col-width characters.
+   Shrinks columns proportionally to how much they exceed the average,
+   preferring to shrink wider columns more.
+   Returns a new array of constrained widths, or widths unchanged if it fits."
+  (def current (total-table-width widths))
+  (if (<= current max-width)
+    widths
+    (do
+      (def ncols (length widths))
+      # Available space for content = max-width - borders - padding
+      (def overhead (+ ncols 1 (* ncols 2)))
+      (def avail (max (- max-width overhead) (* ncols min-col-width)))
+      # Start with natural widths and iteratively shrink
+      (def result (array ;widths))
+      (var total-used 0)
+      (each w result (+= total-used w))
+      (var excess (- total-used avail))
+      # Iteratively take from the widest columns
+      (while (> excess 0)
+        # Find the widest column
+        (var max-w 0)
+        (each w result (when (> w max-w) (set max-w w)))
+        # Count columns at max width
+        (var count-at-max 0)
+        (each w result (when (= w max-w) (++ count-at-max)))
+        # Find the second-widest
+        (var second-max 0)
+        (each w result (when (and (> w second-max) (< w max-w)) (set second-max w)))
+        (when (= second-max 0) (set second-max min-col-width))
+        # How much can we take from each max-width column?
+        (def per-col-take (- max-w (max second-max min-col-width)))
+        (def total-take (* per-col-take count-at-max))
+        (if (<= excess total-take)
+          (do
+            # Distribute the remaining excess across max-width columns
+            (def per-col (math/floor (/ excess count-at-max)))
+            (var leftover (- excess (* per-col count-at-max)))
+            (for c 0 ncols
+              (when (= (get result c) max-w)
+                (def take-amount (+ per-col (if (> leftover 0) 1 0)))
+                (when (> leftover 0) (-- leftover))
+                (put result c (max min-col-width (- (get result c) take-amount)))))
+            (set excess 0))
+          (do
+            # Shrink all max-width columns down to second-max
+            (for c 0 ncols
+              (when (= (get result c) max-w)
+                (put result c (max second-max min-col-width))))
+            (-= excess total-take))))
+      result)))
+
+(defn- wrap-cell-text [text col-width]
+  "Split cell text into multiple lines to fit within col-width.
+   Returns an array of strings. Breaks at spaces when possible,
+   falls back to hard character breaks for long words."
+  (if (<= (strip-inline-markers text) col-width)
+    @[text]
+    (do
+      (def lines @[])
+      # Work with the raw text, splitting at word boundaries
+      (def words (string/split " " text))
+      (var current-line @"")
+      (var current-width 0)
+      (each word words
+        (def word-width (strip-inline-markers word))
+        (if (= current-width 0)
+          # First word on line
+          (if (<= word-width col-width)
+            (do
+              (buffer/push current-line word)
+              (set current-width word-width))
+            # Word too wide even alone — hard break it char by char
+            (do
+              (var pos 0)
+              (var line-w 0)
+              (def wlen (length word))
+              (while (< pos wlen)
+                (def byte (get word pos))
+                (def char-len
+                  (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+                (def cend (min (+ pos char-len) wlen))
+                (def ch (string/slice word pos cend))
+                (def cw (char-width ch))
+                (if (and (> line-w 0) (> (+ line-w cw) col-width))
+                  (do
+                    (array/push lines (string current-line))
+                    (buffer/clear current-line)
+                    (buffer/push current-line ch)
+                    (set line-w cw))
+                  (do
+                    (buffer/push current-line ch)
+                    (+= line-w cw)))
+                (set pos cend))
+              (set current-width line-w)))
+          (if (<= (+ current-width 1 word-width) col-width)
+            # Fits with a space
+            (do
+              (buffer/push current-line " " word)
+              (set current-width (+ current-width 1 word-width)))
+            # Doesn't fit — start a new line
+            (do
+              (array/push lines (string current-line))
+              (buffer/clear current-line)
+              (if (<= word-width col-width)
+                (do
+                  (buffer/push current-line word)
+                  (set current-width word-width))
+                # Word too wide — hard break
+                (do
+                  (var pos 0)
+                  (var line-w 0)
+                  (def wlen (length word))
+                  (while (< pos wlen)
+                    (def byte (get word pos))
+                    (def char-len
+                      (cond (< byte 0x80) 1 (< byte 0xE0) 2 (< byte 0xF0) 3 4))
+                    (def cend (min (+ pos char-len) wlen))
+                    (def ch (string/slice word pos cend))
+                    (def cw (char-width ch))
+                    (if (and (> line-w 0) (> (+ line-w cw) col-width))
+                      (do
+                        (array/push lines (string current-line))
+                        (buffer/clear current-line)
+                        (buffer/push current-line ch)
+                        (set line-w cw))
+                      (do
+                        (buffer/push current-line ch)
+                        (+= line-w cw)))
+                    (set pos cend))
+                  (set current-width line-w)))))))
+      (when (> (length current-line) 0)
+        (array/push lines (string current-line)))
+      (if (empty? lines) @[text] lines))))
+
 (defn- pad-right [text width]
   "Pad text with spaces to the given display width (UTF-8 aware)."
   (def need (- width (string-width text)))
@@ -276,23 +421,42 @@
     (string text (string/repeat " " need))))
 
 (defn- render-table-line [cells widths cell-style]
-  "Render a table data row as a line with styled spans."
-  (def spans @[])
+  "Render a table data row as one or more lines with styled spans.
+   When cell content is wider than its column width, the cell wraps and
+   the row expands vertically. Returns an array of lines."
   (def border-style (styles :list-marker))
   (def ncols (min (length cells) (length widths)))
-  (array/push spans (span "│" border-style))
+  # Wrap each cell's text into sub-lines
+  (def wrapped-cells (array/new ncols))
+  (var max-lines 1)
   (for c 0 ncols
     (def cell-text (get cells c ""))
-    (def display-width (strip-inline-markers cell-text))
     (def col-width (get widths c 0))
-    (def pad-amount (- col-width display-width))
-    (array/push spans (span " " style-default))
-    (array/concat spans (parse-inline-spans cell-text cell-style))
-    (when (> pad-amount 0)
-      (array/push spans (span (string/repeat " " pad-amount) style-default)))
-    (array/push spans (span " " style-default))
-    (array/push spans (span "│" border-style)))
-  (line ;spans))
+    (def sub-lines (wrap-cell-text cell-text col-width))
+    (array/push wrapped-cells sub-lines)
+    (when (> (length sub-lines) max-lines)
+      (set max-lines (length sub-lines))))
+  # Produce one output line per visual row
+  (def result @[])
+  (for row-idx 0 max-lines
+    (def spans @[])
+    (array/push spans (span "│" border-style))
+    (for c 0 ncols
+      (def col-width (get widths c 0))
+      (def sub-lines (get wrapped-cells c))
+      (def sub-text (get sub-lines row-idx ""))
+      (def display-width (strip-inline-markers sub-text))
+      (def pad-amount (- col-width display-width))
+      (array/push spans (span " " style-default))
+      (if (> (length sub-text) 0)
+        (array/concat spans (parse-inline-spans sub-text cell-style))
+        (array/push spans (span "" style-default)))
+      (when (> pad-amount 0)
+        (array/push spans (span (string/repeat " " pad-amount) style-default)))
+      (array/push spans (span " " style-default))
+      (array/push spans (span "│" border-style)))
+    (array/push result (line ;spans)))
+  result)
 
 (defn- render-table-border [widths ch]
   "Render a horizontal border line (top, middle, or bottom).
@@ -317,17 +481,18 @@
   "Render a complete table as an array of lines."
   (def result @[])
   (array/push result (render-table-border widths :top))
-  (array/push result (render-table-line header-cells widths (styles :bold)))
+  (array/concat result (render-table-line header-cells widths (styles :bold)))
   (array/push result (render-table-border widths :mid))
   (each row data-rows
-    (array/push result (render-table-line row widths style-default)))
+    (array/concat result (render-table-line row widths style-default)))
   (array/push result (render-table-border widths :bot))
   result)
 
 # ── Complete markdown parsing (non-streaming) ──────────────────
 
-(defn- flush-table-rows [lines table-rows]
-  "Process accumulated table rows and append rendered lines."
+(defn- flush-table-rows [lines table-rows &opt max-width]
+  "Process accumulated table rows and append rendered lines.
+   When max-width is provided, columns are constrained to fit and cells wrap."
   (when (>= (length table-rows) 2)
     (def first-row (get table-rows 0))
     (def second-row (get table-rows 1))
@@ -342,7 +507,10 @@
             (array/push data-rows (parse-table-cells (get table-rows i)))))
         (def all-rows @[header-cells ;data-rows])
         (def widths (compute-col-widths all-rows))
-        (each ln (render-table header-cells data-rows widths)
+        (def final-widths (if max-width
+                            (constrain-col-widths widths max-width)
+                            widths))
+        (each ln (render-table header-cells data-rows final-widths)
           (array/push lines ln)))
       (do
         # No separator — just render rows as plain data table (no header distinction)
@@ -353,20 +521,27 @@
             (array/push all-cells (parse-table-cells row))))
         (when (> (length all-cells) 0)
           (def widths (compute-col-widths all-cells))
-          (array/push lines (render-table-border widths :top))
+          (def final-widths (if max-width
+                              (constrain-col-widths widths max-width)
+                              widths))
+          (array/push lines (render-table-border final-widths :top))
           (each row all-cells
-            (array/push lines (render-table-line row widths style-default)))
-          (array/push lines (render-table-border widths :bot))))))
+            (array/concat lines (render-table-line row final-widths style-default)))
+          (array/push lines (render-table-border final-widths :bot))))))
   # Edge case: single row (shouldn't happen normally, but be defensive)
   (when (= (length table-rows) 1)
     (def cells (parse-table-cells (get table-rows 0)))
     (def widths (compute-col-widths @[cells]))
-    (array/push lines (render-table-border widths :top))
-    (array/push lines (render-table-line cells widths style-default))
-    (array/push lines (render-table-border widths :bot))))
+    (def final-widths (if max-width
+                        (constrain-col-widths widths max-width)
+                        widths))
+    (array/push lines (render-table-border final-widths :top))
+    (array/concat lines (render-table-line cells final-widths style-default))
+    (array/push lines (render-table-border final-widths :bot))))
 
-(defn markdown->lines [md-text]
-  "Convert markdown text to a sequence of styled lines"
+(defn markdown->lines [md-text &opt max-width]
+  "Convert markdown text to a sequence of styled lines.
+   When max-width is provided, tables are constrained to fit within that width."
   (def lines @[])
   (def raw-lines (string/split "\n" md-text))
   (var in-code-block false)
@@ -379,7 +554,7 @@
       (do
         # Flush any pending table
         (when (> (length table-rows) 0)
-          (flush-table-rows lines table-rows)
+          (flush-table-rows lines table-rows max-width)
           (set table-rows @[]))
         (set in-code-block (not in-code-block))
         (array/push lines (line (span raw-line (styles :code-block)))))
@@ -391,7 +566,7 @@
           (do
             # Non-table line — flush any pending table first
             (when (> (length table-rows) 0)
-              (flush-table-rows lines table-rows)
+              (flush-table-rows lines table-rows max-width)
               (set table-rows @[]))
             (cond
               # Empty line
@@ -428,7 +603,7 @@
 
   # Flush any trailing table
   (when (> (length table-rows) 0)
-    (flush-table-rows lines table-rows))
+    (flush-table-rows lines table-rows max-width))
 
   lines)
 
@@ -504,10 +679,11 @@
     # Regular text — apply inline formatting
     (parse-inline-spans line-text style-default)))
 
-(defn create-chat-markdown-parser [output-callback]
+(defn create-chat-markdown-parser [output-callback &opt max-width]
   "Create a streaming markdown parser for chat integration.
    Processes complete lines and calls output-callback with span arrays.
-   Tracks fenced code block state so inline formatting is suppressed inside."
+   Tracks fenced code block state so inline formatting is suppressed inside.
+   When max-width is provided, tables are constrained to fit within that width."
 
   (def buffer @"")
   (var in-code-block false)
@@ -516,7 +692,7 @@
   (def flush-table (fn []
                     (when (> (length table-rows) 0)
                       (def table-lines @[])
-                      (flush-table-rows table-lines table-rows)
+                      (flush-table-rows table-lines table-rows max-width)
                       (each ln table-lines
                         (output-callback (ln :spans)))
                       (set table-rows @[]))))

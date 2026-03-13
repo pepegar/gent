@@ -668,36 +668,33 @@
                                                   (t/assert-falsy (any-row-contains? rows "stdout"))
                                                   (t/assert-falsy (any-row-contains? rows "stderr"))))
 
-# ── Table truncation at narrow widths ──────────────────────
+# ── Table rendering at various widths ──────────────────────
 
-(t/test "snapshot: wide table is truncated not wrapped at narrow width" (fn []
-                                                                         (def w (setup 50 20))
+(t/test "snapshot: wide table wraps cells at narrow width" (fn []
+                                                             (def w (setup 50 20))
   # Feed a markdown table wider than 50 columns through the agent markdown parser
-                                                                         (chat/output-agent
-                                                                           (string "Here is a table:\n"
-                                                                                   "| Column A Long Name | Column B Long Name | Column C Long Name |\n"
-                                                                                   "| --- | --- | --- |\n"
-                                                                                   "| cell one value | cell two value | cell three value |\n"))
-                                                                         (def rows (render-chat w 50 20))
+                                                             (chat/output-agent
+                                                               (string "Here is a table:\n"
+                                                                       "| Column A Long Name | Column B Long Name | Column C Long Name |\n"
+                                                                       "| --- | --- | --- |\n"
+                                                                       "| cell one value | cell two value | cell three value |\n"))
+                                                             (def rows (render-chat w 50 20))
   # Table lines should be present (rendered with box-drawing chars)
-                                                                         (t/assert-truthy (any-row-contains? rows "\xE2\x94\x82"))
-  # No table line should wrap — each row with box-drawing should be at most one visual row
-  # Check that no row starts with a box-drawing continuation (which would happen with wrapping)
-  # Instead, truncated lines should contain ellipsis
-                                                                         (var has-ellipsis false)
-                                                                         (each row rows
-                                                                           (when (string/find "\xE2\x80\xA6" row) (set has-ellipsis true)))
-                                                                         (t/assert-truthy has-ellipsis)
-  # Verify that box-drawing chars don't appear split across lines.
-  # If wrapping occurred, we'd see rows that start with a box-drawing char continuation
-  # but don't have the table structure. Count rows that contain │.
-                                                                         (var table-rows-count 0)
-                                                                         (each row rows
-                                                                           (when (string/find "\xE2\x94\x82" row) (++ table-rows-count)))
-  # A 1-data-row table with borders = 5 lines (top border, header, mid border, data, bottom border)
-  # Plus the "gent: Here is a table:" line = 6 lines with box-drawing or table content
-  # With wrapping, this would be many more. The table has 5 box-drawing lines.
-                                                                         (t/assert-truthy (<= table-rows-count 5))))
+                                                             (t/assert-truthy (any-row-contains? rows "│"))
+  # All cell content should be visible (wrapped, not truncated)
+  # The table is constrained to fit the available width, so no ellipsis
+                                                             (var has-ellipsis false)
+                                                             (each row rows
+                                                               (when (string/find "…" row) (set has-ellipsis true)))
+                                                             (t/assert-falsy has-ellipsis)
+  # Verify the content is all visible somewhere in the rendered output
+                                                             (def all-text (string/join rows "\n"))
+                                                             (t/assert-truthy (string/find "Column A" all-text))
+                                                             (t/assert-truthy (string/find "Column B" all-text))
+                                                             (t/assert-truthy (string/find "Column C" all-text))
+                                                             (t/assert-truthy (string/find "cell one" all-text))
+                                                             (t/assert-truthy (string/find "cell two" all-text))
+                                                             (t/assert-truthy (string/find "cell three" all-text))))
 
 (t/test "snapshot: narrow table that fits is not truncated" (fn []
                                                              (def w (setup 60 20))
@@ -708,11 +705,11 @@
                                                                        "| 1 | 2 |\n"))
                                                              (def rows (render-chat w 60 20))
   # Table should be present
-                                                             (t/assert-truthy (any-row-contains? rows "\xE2\x94\x82"))
+                                                             (t/assert-truthy (any-row-contains? rows "│"))
   # No ellipsis — table fits
                                                              (var has-ellipsis false)
                                                              (each row rows
-                                                               (when (string/find "\xE2\x80\xA6" row) (set has-ellipsis true)))
+                                                               (when (string/find "…" row) (set has-ellipsis true)))
                                                              (t/assert-falsy has-ellipsis)))
 
 (def pass (t/pass))

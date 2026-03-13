@@ -418,3 +418,78 @@
 (t/test "inline link" test-inline-link)
 (t/test "inline link no url" test-inline-link-no-url)
 (t/test "inline link with bold" test-inline-link-with-bold)
+
+# ── Table width-constraining tests ─────────────────────────
+
+(defn test-table-constrained-width []
+  # A table that would be ~70 chars wide unconstrained, rendered at max-width 40
+  (def sample "| Name | Description |\n|------|-------------|\n| Alice | A very long description that should wrap |\n| Bob | Short |")
+  (def lines (md/markdown->lines sample 40))
+  # All lines should fit within 40 columns
+  (each ln lines
+    (t/assert-truthy (<= (text/line-width ln) 40))))
+
+(defn test-table-constrained-all-content-visible []
+  # Verify that all cell content appears somewhere in the rendered lines
+  (def sample "| Tool | Purpose |\n|------|--------|\n| bash | Execute shell commands |\n| read_file | Read file contents |")
+  (def lines (md/markdown->lines sample 30))
+  (def all-text (string ;(map (fn [ln] (string ;(map |($ :text) (ln :spans)))) lines)))
+  (t/assert-truthy (string/find "bash" all-text))
+  (t/assert-truthy (string/find "Execute" all-text))
+  (t/assert-truthy (string/find "read_file" all-text))
+  (t/assert-truthy (string/find "Read" all-text)))
+
+(defn test-table-unconstrained-unchanged []
+  # Without max-width, behavior is the same as before
+  (def sample "| A | B |\n|---|---|\n| 1 | 2 |")
+  (def lines-no-max (md/markdown->lines sample))
+  (def lines-big-max (md/markdown->lines sample 200))
+  # Should produce same number of lines
+  (t/assert= (length lines-no-max) (length lines-big-max))
+  # Each line should have the same width
+  (for i 0 (length lines-no-max)
+    (t/assert= (text/line-width (get lines-no-max i))
+               (text/line-width (get lines-big-max i)))))
+
+(defn test-table-cell-wrapping []
+  # A table with a very long cell that must wrap
+  (def sample "| Key | Value |\n|-----|-------|\n| x | This is a very long value that definitely needs wrapping |")
+  (def lines (md/markdown->lines sample 30))
+  # Should produce more than 5 lines (the normal 5 for a 1-row table)
+  # because the data row needs to wrap
+  (t/assert-truthy (> (length lines) 5))
+  # All lines should fit within 30 columns
+  (each ln lines
+    (t/assert-truthy (<= (text/line-width ln) 30))))
+
+(defn test-table-streaming-constrained []
+  (def output @[])
+  (def parser (md/create-chat-markdown-parser
+                (fn [spans] (array/push output spans))
+                30))
+  ((parser :feed) "| Name | Description |\n")
+  ((parser :feed) "|------|-------------|\n")
+  ((parser :feed) "| Alice | A long description here |\n")
+  ((parser :feed) "\n")
+  ((parser :finish))
+  # All output lines should fit within 30 columns
+  (each spans output
+    (var width 0)
+    (each s spans (+= width (text/span-width s)))
+    (t/assert-truthy (<= width 30))))
+
+(defn test-table-borders-aligned-after-constraining []
+  # When constrained, all border and data lines should still have equal width
+  (def sample "| Column One | Column Two | Column Three |\n|------------|------------|-------|\n| data 1 | data 2 | data 3 |")
+  (def lines (md/markdown->lines sample 35))
+  (def widths (map |(text/line-width $) lines))
+  (def first-width (get widths 0))
+  (each w widths
+    (t/assert= first-width w)))
+
+(t/test "table constrained width" test-table-constrained-width)
+(t/test "table constrained all content visible" test-table-constrained-all-content-visible)
+(t/test "table unconstrained unchanged" test-table-unconstrained-unchanged)
+(t/test "table cell wrapping" test-table-cell-wrapping)
+(t/test "table streaming constrained" test-table-streaming-constrained)
+(t/test "table borders aligned after constraining" test-table-borders-aligned-after-constraining)
