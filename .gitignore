@@ -23,3 +23,4 @@ result
 .gent/profile*
 .direnv
 PLAN.md
+.worktrees
