@@ -37,10 +37,10 @@
          (def models (api/list-models))
          (cond
            (nil? models)
-           "Failed to fetch models. Check your API key and network connection."
+           (string "Failed to fetch models. Check your API key and network connection.\n\nCurrent: " current-model)
 
            (empty? models)
-           "No models returned by the API."
+           (string "No models returned by the API.\n\nCurrent: " current-model)
 
            (do
              (def sorted (sort-by |(get $ :id) models))
