@@ -41,6 +41,9 @@ jobs:
       - name: Rust tests
         run: cargo test
 
+      - name: Installer smoke tests
+        run: bash test/install.sh
+
       - name: Cache tui-wright binary
         uses: actions/cache@v4
         id: cache-tui-wright

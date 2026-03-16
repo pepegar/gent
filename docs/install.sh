@@ -132,7 +132,7 @@ else
   run_escalated mv "${TMPDIR}/gent" "${INSTALL_DIR}/gent"
 fi
 
-chmod +x "${INSTALL_DIR}/gent"
+run_escalated chmod +x "${INSTALL_DIR}/gent"
 
 say "done" "gent installed to ${INSTALL_DIR}/gent"
 echo ""
