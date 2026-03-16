@@ -21,6 +21,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-${{ runner.os }}-native
+
       - name: Install Janet
         shell: bash
         run: |
@@ -44,16 +49,12 @@ jobs:
       - name: Installer smoke tests
         run: bash test/install.sh
 
-      - name: Cache tui-wright binary
-        uses: actions/cache@v4
-        id: cache-tui-wright
-        with:
-          path: ~/.cargo/bin/tui-wright
-          key: tui-wright-${{ runner.os }}-f565303f
-
       - name: Install tui-wright
-        if: steps.cache-tui-wright.outputs.cache-hit != 'true'
-        run: cargo install --git https://github.com/pepegar/tui-wright --rev f565303f0af6115a403f9b600a97f50cc59ef3dd
+        shell: bash
+        run: |
+          if ! command -v tui-wright >/dev/null 2>&1; then
+            cargo install --git https://github.com/pepegar/tui-wright --rev f565303f0af6115a403f9b600a97f50cc59ef3dd
+          fi
 
       - name: Integration tests (tui-wright)
         env:
