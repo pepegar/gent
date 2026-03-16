@@ -6,6 +6,8 @@ gent is an open source AI coding agent with a scripting engine at its core. It r
 
 Other agents give you config files. gent gives you a programmable runtime.
 
+![gent demo — creating and using a tool at runtime](demo/homepage.gif)
+
 ## Quick start
 
 ```sh

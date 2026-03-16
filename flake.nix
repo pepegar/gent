@@ -16,6 +16,10 @@
       url = "github:pepegar/tui-wright";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    agg = {
+      url = "github:asciinema/agg";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -25,6 +29,7 @@
     rust-overlay,
     parinfer-rust,
     tui-wright,
+    agg,
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       overlays = [(import rust-overlay)];
@@ -142,6 +147,7 @@
           ++ [
             parinfer-rust.packages.${system}.default
             tui-wright.packages.${system}.default
+            agg.packages.${system}.default
           ]
           ++ (with pkgs; [
             # Additional development tools
