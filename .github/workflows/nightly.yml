@@ -12,6 +12,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  test:
+    name: Test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-${{ runner.os }}-native
+
+      - name: Install Janet
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            git clone --depth 1 --branch v1.37.1 https://github.com/janet-lang/janet.git /tmp/janet
+            cd /tmp/janet && make -j$(nproc) && sudo make install
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install janet
+          fi
+
+      - name: Run tests
+        run: |
+          cargo build
+          janet janet/test/run.janet
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -48,23 +82,6 @@ jobs:
             cargo install cross --git https://github.com/cross-rs/cross
           fi
 
-      - name: Install Janet
-        if: matrix.target != 'aarch64-unknown-linux-musl'
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            git clone --depth 1 --branch v1.37.1 https://github.com/janet-lang/janet.git /tmp/janet
-            cd /tmp/janet && make -j$(nproc) && sudo make install
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install janet
-          fi
-
-      - name: Run tests
-        if: matrix.target != 'aarch64-unknown-linux-musl'
-        run: |
-          cargo build
-          janet janet/test/run.janet
-
       - name: Build release binary
         shell: bash
         run: |
@@ -89,7 +106,7 @@ jobs:
 
   publish:
     name: Update nightly release
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
