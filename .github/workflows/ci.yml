@@ -53,6 +53,28 @@ jobs:
       - name: Installer smoke tests
         run: bash test/install.sh
 
+  integration:
+    name: Integration ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-${{ runner.os }}-native
+
+      - name: Build
+        run: cargo build
+
       - name: Install tui-wright
         shell: bash
         run: |
