@@ -1783,25 +1783,37 @@
   # Bottom-align: if content doesn't fill the viewport, offset downward
   (def y-offset (- render-height visible-count))
 
-  # Render each visual row (visual-rows is bottom-to-top, render top-to-bottom)
+  # Render each visual row (visual-rows is bottom-to-top, render top-to-bottom).
+  # Batch consecutive same-style cells into buffer-set-string calls to reduce
+  # the number of individual cell writes from O(chars) to O(style-runs).
   (def row-end (+ (rect :x) width))
-  (def blank-style (tui/style))
   (for i 0 visible-count
     (def [row rs] (get visual-rows (- visible-count 1 i)))
     (def y (+ (rect :y) y-offset i))
     # Content starts 1 column right of the gutter for styled rows
     (def content-x (if rs (+ (rect :x) 1) (rect :x)))
     (var col content-x)
+    (var batch-str @"")
+    (var batch-style nil)
+    (var batch-x col)
     (each cell row
       (when (>= col row-end) (break))
       (def ch (cell :text))
       (def w (tui/char-width ch))
       (when (and (> w 1) (> (+ col w) row-end)) (break))
-      (tui/buffer-set-char buf col y ch (cell :style))
-      (when (= w 2)
-        (when (< (+ col 1) row-end)
-          (tui/buffer-set-char buf (+ col 1) y "" (cell :style))))
+      (def st (cell :style))
+      (if (tui/style= batch-style st)
+        (buffer/push-string batch-str ch)
+        (do
+          (when (> (length batch-str) 0)
+            (tui/buffer-set-string buf batch-x y batch-str batch-style)
+            (buffer/clear batch-str))
+          (set batch-style st)
+          (set batch-x col)
+          (buffer/push-string batch-str ch)))
       (+= col (max w 1)))
+    (when (> (length batch-str) 0)
+      (tui/buffer-set-string buf batch-x y batch-str batch-style))
     (when rs
       (def gutter-color
         (cond
