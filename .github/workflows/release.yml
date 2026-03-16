@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -89,7 +93,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y musl-tools
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            cargo install cross --git https://github.com/cross-rs/cross
+            if ! command -v cross >/dev/null 2>&1; then
+              cargo install cross --git https://github.com/cross-rs/cross
+            fi
           fi
 
       - name: Build release binary
@@ -113,6 +119,7 @@ jobs:
         with:
           name: gent-${{ matrix.target }}
           path: gent-${{ matrix.target }}.tar.gz
+          compression-level: 0
 
   release:
     name: Create Release
