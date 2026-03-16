@@ -146,6 +146,37 @@
   (set prev-buf nil)
   (set widget-bufs @{}))
 
+(defn- render-widget-diff
+  "Render one dirty widget, diff against prev-buf, return the diff string.
+   Returns empty string when the widget is not dirty, has no rect, or produces
+   no visual change. Clears the dirty flag on the widget as a side effect."
+  [name]
+  (def w (widget/get-widget name))
+  (when (nil? w) (break ""))
+  (when (not (and (w :dirty) (w :rect) (w :render))) (break ""))
+  (def r (w :rect))
+  (def cached (get widget-bufs name))
+  (def small-buf
+    (if (and cached (= (cached :area) r))
+      (tui/buffer-clear cached)
+      (let [b (tui/buffer r true)]
+        (put widget-bufs name b)
+        b)))
+  (profile/with-span (string "render:" (string name)) "render"
+    (fn [] ((w :render) w r small-buf)))
+  (put w :dirty false)
+  # After scroll-region-optimize, only the N new rows need diffing.
+  (when (and pending-scroll-opt (= name :chat))
+    (def info pending-scroll-opt)
+    (set pending-scroll-opt nil)
+    (when-let [dr (small-buf :dirty-rows)]
+      (for i 0 (length dr) (put dr i false))
+      (def delta (info :delta))
+      (if (= (info :direction) :up)
+        (for i 0 (min delta (length dr)) (put dr i true))
+        (for i (max 0 (- (length dr) delta)) (length dr) (put dr i true)))))
+  (buffer/diff prev-buf small-buf r))
+
 (defn- render-frame
   "Render dirty widgets, diff against previous frame, flush."
   []
@@ -162,132 +193,124 @@
     (unless (or (dialog/active?) (completion/active?))
       (set popup-was-visible false)))
 
-  # Accumulate all frame output into a single buffer for atomic write.
-  # This prevents flicker when popup overlays cover widget areas — without
-  # batching, the widget diff would briefly flash through the popup before
-  # the overlay redraws on top.
-  (def frame-out @"")
-
   (if (nil? prev-buf)
-    # First frame or after resize — full render
+    # First frame or after resize — full render, single atomic write.
     (do
       (set pending-scroll-opt nil)
       (def buf (tui/buffer screen-area))
+      (def full-out @"")
       (each name (widget/list-widgets)
         (when-let [w (widget/get-widget name)]
           (when (and (w :rect) (w :render))
             (profile/with-span (string "render:" (string name)) "render"
               (fn [] ((w :render) w (w :rect) buf)))
             (put w :dirty false))))
-      (buffer/push frame-out (tui/buffer->str buf))
-      (set prev-buf buf))
+      (buffer/push full-out (tui/buffer->str buf))
+      (when (> (length full-out) 0)
+        (term/write (string full-out)))
+      (set prev-buf buf)
+      (editor/redraw))
 
-    # Incremental: render only dirty widget rects, diff just those areas
+    # Incremental: render editor first and flush immediately so keystrokes
+    # appear without waiting for the (potentially expensive) chat render.
+    # Then render the remaining widgets, append popup overlays, and flush
+    # everything in a single atomic write to prevent flicker.
     (do
+      # Pass 1: editor only — flush immediately for low-latency keystroke feedback.
+      (def editor-diff (render-widget-diff :editor))
+      (when (> (length editor-diff) 0)
+        (term/write (string editor-diff)))
+      # Position cursor right after the editor flush so the user sees it
+      # settle before the (slower) chat render begins.
+      (editor/redraw)
+
+      # Pass 2: all other widgets + popup overlays — batched to prevent flicker.
+      (def frame-out @"")
       (each name (widget/list-widgets)
-        (when-let [w (widget/get-widget name)]
-          (when (and (w :dirty) (w :rect) (w :render))
-            (def r (w :rect))
-            (def cached (get widget-bufs name))
-            (def small-buf
-              (if (and cached (= (cached :area) r))
-                (tui/buffer-clear cached)
-                (let [b (tui/buffer r true)]
-                  (put widget-bufs name b)
-                  b)))
-            (profile/with-span (string "render:" (string name)) "render"
-              (fn [] ((w :render) w r small-buf)))
-            (put w :dirty false)
-            # After scroll-region-optimize, only the N new rows need diffing
-            (when (and pending-scroll-opt (= name :chat))
-              (def info pending-scroll-opt)
-              (set pending-scroll-opt nil)
-              (when-let [dr (small-buf :dirty-rows)]
-                (for i 0 (length dr) (put dr i false))
-                (def delta (info :delta))
-                (if (= (info :direction) :up)
-                  (for i 0 (min delta (length dr)) (put dr i true))
-                  (for i (max 0 (- (length dr) delta)) (length dr) (put dr i true)))))
-            (def diff-str (buffer/diff prev-buf small-buf r))
-            (when (not= "" diff-str) (buffer/push frame-out diff-str)))))))
+        (when (not= name :editor)
+          (def diff (render-widget-diff name))
+          (when (> (length diff) 0)
+            (buffer/push frame-out diff))))
 
-  # Render completion popup overlay (if active)
-  (when (and prev-buf screen-area (completion/active?))
-    (def [cursor-row cursor-col] (editor/get-cursor-screen-pos))
-    (when (and cursor-row cursor-col)
-      (def popup (completion/render-popup cursor-row cursor-col screen-area))
-      (when popup
-        (set popup-was-visible true)
-        (def parts @[])
-        (var cur-style nil)
-        (each cell (popup :cells)
-          (def x (cell :x))
-          (def y (cell :y))
-          (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
-          (def st (cell :style))
-          (when (not (tui/style= st cur-style))
+      # Render completion popup overlay (if active)
+      (when (and screen-area (completion/active?))
+        (def [cursor-row cursor-col] (editor/get-cursor-screen-pos))
+        (when (and cursor-row cursor-col)
+          (def popup (completion/render-popup cursor-row cursor-col screen-area))
+          (when popup
+            (set popup-was-visible true)
+            (def parts @[])
+            (var cur-style nil)
+            (each cell (popup :cells)
+              (def x (cell :x))
+              (def y (cell :y))
+              (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+              (def st (cell :style))
+              (when (not (tui/style= st cur-style))
+                (array/push parts "\x1b[0m")
+                (def sgr (tui/style->sgr st))
+                (when (not= sgr "") (array/push parts sgr))
+                (set cur-style st))
+              (array/push parts (cell :ch))
+              (tui/buffer-set-char prev-buf x y (cell :ch) st))
+            (when (not (empty? parts))
+              (array/push parts "\x1b[0m")
+              (buffer/push frame-out (string ;parts))))))
+
+      # Render dialog overlay (if active)
+      (when (and screen-area (dialog/active?))
+        (def popup (dialog/render-overlay screen-area))
+        (when popup
+          (set popup-was-visible true)
+          (def parts @[])
+          (var cur-style nil)
+          (each cell (popup :cells)
+            (def x (cell :x))
+            (def y (cell :y))
+            (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+            (def st (cell :style))
+            (when (not (tui/style= st cur-style))
+              (array/push parts "\x1b[0m")
+              (def sgr (tui/style->sgr st))
+              (when (not= sgr "") (array/push parts sgr))
+              (set cur-style st))
+            (array/push parts (cell :ch))
+            (tui/buffer-set-char prev-buf x y (cell :ch) st))
+          (when (not (empty? parts))
             (array/push parts "\x1b[0m")
-            (def sgr (tui/style->sgr st))
-            (when (not= sgr "") (array/push parts sgr))
-            (set cur-style st))
-          (array/push parts (cell :ch))
-          (tui/buffer-set-char prev-buf x y (cell :ch) st))
-        (when (not (empty? parts))
-          (array/push parts "\x1b[0m")
-          (buffer/push frame-out (string ;parts))))))
+            (buffer/push frame-out (string ;parts)))))
 
-  # Render dialog overlay (if active)
-  (when (and prev-buf screen-area (dialog/active?))
-    (def popup (dialog/render-overlay screen-area))
-    (when popup
-      (set popup-was-visible true)
-      (def parts @[])
-      (var cur-style nil)
-      (each cell (popup :cells)
-        (def x (cell :x))
-        (def y (cell :y))
-        (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
-        (def st (cell :style))
-        (when (not (tui/style= st cur-style))
-          (array/push parts "\x1b[0m")
-          (def sgr (tui/style->sgr st))
-          (when (not= sgr "") (array/push parts sgr))
-          (set cur-style st))
-        (array/push parts (cell :ch))
-        (tui/buffer-set-char prev-buf x y (cell :ch) st))
-      (when (not (empty? parts))
-        (array/push parts "\x1b[0m")
-        (buffer/push frame-out (string ;parts)))))
+      # Render sessions explorer overlay (if active)
+      (when (and screen-area (sessions-explorer/active?))
+        (def popup (sessions-explorer/render-overlay screen-area))
+        (when popup
+          (set popup-was-visible true)
+          (def parts @[])
+          (var cur-style nil)
+          (each cell (popup :cells)
+            (def x (cell :x))
+            (def y (cell :y))
+            (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+            (def st (cell :style))
+            (when (not (tui/style= st cur-style))
+              (array/push parts "\x1b[0m")
+              (def sgr (tui/style->sgr st))
+              (when (not= sgr "") (array/push parts sgr))
+              (set cur-style st))
+            (array/push parts (cell :ch))
+            (tui/buffer-set-char prev-buf x y (cell :ch) st))
+          (when (not (empty? parts))
+            (array/push parts "\x1b[0m")
+            (buffer/push frame-out (string ;parts)))))
 
-  # Render sessions explorer overlay (if active)
-  (when (and prev-buf screen-area (sessions-explorer/active?))
-    (def popup (sessions-explorer/render-overlay screen-area))
-    (when popup
-      (set popup-was-visible true)
-      (def parts @[])
-      (var cur-style nil)
-      (each cell (popup :cells)
-        (def x (cell :x))
-        (def y (cell :y))
-        (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
-        (def st (cell :style))
-        (when (not (tui/style= st cur-style))
-          (array/push parts "\x1b[0m")
-          (def sgr (tui/style->sgr st))
-          (when (not= sgr "") (array/push parts sgr))
-          (set cur-style st))
-        (array/push parts (cell :ch))
-        (tui/buffer-set-char prev-buf x y (cell :ch) st))
-      (when (not (empty? parts))
-        (array/push parts "\x1b[0m")
-        (buffer/push frame-out (string ;parts)))))
+      # Flush pass-2 output (remaining widgets + overlays) in a single atomic
+      # write. Batching here prevents flicker when a popup overlay covers widget
+      # areas — the widget diff and the overlay land together.
+      (when (> (length frame-out) 0)
+        (term/write (string frame-out)))
 
-  # Flush all frame output in a single atomic write
-  (when (> (length frame-out) 0)
-    (term/write (string frame-out)))
-
-  # Restore cursor to editor position
-  (editor/redraw))
+      # Restore cursor to editor position after all terminal writes are done.
+      (editor/redraw))))
 
 (defn force-rerender
   "Force a full screen redraw on the next frame."
