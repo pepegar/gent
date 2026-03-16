@@ -3,60 +3,262 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gent — the programmable coding agent</title>
-  <meta name="description" content="An open source AI coding agent with a real scripting engine. Modify tools, hooks, UI and behavior at runtime.">
+  <title>gent — the hackable coding agent</title>
+  <meta name="description" content="Other coding agents stop at config files. gent stays hackable, even at runtime. Open source coding agent with scriptable tools, hooks, UI, and behavior.">
+  <link rel="canonical" href="https://try.gent/">
+  <meta name="theme-color" content="#09111f">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://try.gent/">
+  <meta property="og:site_name" content="gent">
+  <meta property="og:title" content="gent — the hackable coding agent">
+  <meta property="og:description" content="Other coding agents stop at config files. gent stays hackable, even at runtime.">
+  <meta property="og:image" content="https://try.gent/og-card.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="gent — the hackable coding agent">
+  <meta name="twitter:description" content="Other coding agents stop at config files. gent stays hackable, even at runtime.">
+  <meta name="twitter:image" content="https://try.gent/og-card.svg">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2309111f'/%3E%3Cpath d='M19 19h8l18 13-18 13h-8l18-13-18-13z' fill='%2363ffa2'/%3E%3C/svg%3E">
   <style>
     :root {
-      --bg: #0d1117;
-      --fg: #e6edf3;
-      --dim: #7d8590;
-      --accent: #58a6ff;
-      --green: #3fb950;
-      --surface: #161b22;
-      --border: #30363d;
+      --bg: #09111f;
+      --surface: rgba(12, 21, 38, 0.84);
+      --surface-strong: rgba(18, 29, 50, 0.96);
+      --surface-soft: rgba(255, 255, 255, 0.04);
+      --fg: #eff5ff;
+      --muted: #93a3bf;
+      --line: rgba(160, 183, 217, 0.18);
+      --accent: #63ffa2;
+      --accent-soft: rgba(99, 255, 162, 0.14);
+      --link: #8fc6ff;
+      --shadow: 0 30px 100px rgba(0, 0, 0, 0.45);
+      --radius: 22px;
+      --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", "Consolas", monospace;
+      --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--fg);
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      background: #09111f;
+      color: var(--fg);
+      font-family: var(--sans);
       padding: 2rem;
     }
 
-    .logo {
-      font-size: clamp(4rem, 12vw, 8rem);
-      font-weight: 800;
-      letter-spacing: -0.04em;
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .page {
+      max-width: 1160px;
+      margin: 0 auto;
+    }
+
+    .site-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 3.5rem;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7rem;
       color: var(--fg);
-      line-height: 1;
-      margin-bottom: 0.25em;
+      text-decoration: none;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: lowercase;
     }
 
-    .logo span {
-      color: var(--green);
+    .brand-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.2rem;
+      height: 2.2rem;
+      border-radius: 0.8rem;
+      background: linear-gradient(135deg, rgba(99, 255, 162, 0.18), rgba(143, 198, 255, 0.12));
+      border: 1px solid rgba(99, 255, 162, 0.2);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 1.05rem;
     }
 
-    .tagline {
-      font-size: clamp(1rem, 3vw, 1.35rem);
-      color: var(--dim);
-      margin-bottom: 3rem;
-      text-align: center;
+    .header-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      font-size: 0.95rem;
+    }
+
+    .hero-copy,
+    .demo-section,
+    .install-section,
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-copy {
+      padding: 2.5rem;
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-size: clamp(2.6rem, 5vw, 4.8rem);
+      line-height: 0.94;
+      letter-spacing: -0.04em;
+      margin-bottom: 1.35rem;
+    }
+
+    .hero-accent {
+      color: var(--accent);
+      display: inline-block;
+      letter-spacing: -0.06em;
+      margin-left: -0.035em;
+    }
+
+    .lede {
+      max-width: 42rem;
+      font-size: clamp(1.04rem, 2vw, 1.2rem);
+      line-height: 1.65;
+      color: var(--muted);
+      margin-bottom: 1.6rem;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      margin-bottom: 1.6rem;
+    }
+
+    .cta,
+    .cta-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      border-radius: 999px;
+      padding: 0.88rem 1.2rem;
+      font-weight: 700;
+      font-size: 0.96rem;
+      transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+    }
+
+    .cta {
+      background: var(--accent);
+      color: #04110a;
+    }
+
+    .cta:hover,
+    .cta-secondary:hover,
+    .copy-btn:hover {
+      transform: translateY(-1px);
+      text-decoration: none;
+    }
+
+    .cta-secondary {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--fg);
+    }
+
+    .cast-shell {
+      min-height: 34rem;
+      border-radius: 18px;
+      padding: 1rem;
+    }
+
+    .cast-shell .asciinema-player,
+    .cast-shell iframe {
+      width: 100%;
+      max-width: 100%;
+      border-radius: 14px;
+    }
+
+    .cast-fallback {
+      display: block;
+      width: 100%;
+    }
+
+    .cast-fallback img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 14px;
+    }
+
+    .hero {
+      margin-bottom: 2rem;
+    }
+
+    .demo-section {
+      padding: 1.6rem;
+      margin-bottom: 2rem;
+    }
+
+    .install-section {
+      padding: 1.6rem;
+      margin-bottom: 2rem;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .section-head h2,
+    .feature-card h2 {
+      font-family: var(--serif);
+      font-size: clamp(1.65rem, 3vw, 2.4rem);
+      letter-spacing: -0.03em;
+      margin-bottom: 0.35rem;
+    }
+
+    .section-head p,
+    .feature-card p,
+    .feature-card li {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .install-grid,
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
     }
 
     .install-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0;
-      max-width: 600px;
-      width: 100%;
+      background: var(--surface-strong);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 18px;
       overflow: hidden;
     }
 
@@ -64,151 +266,302 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0.6rem 1rem;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg);
+      gap: 1rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .install-header div {
+      min-width: 0;
+    }
+
+    .install-header strong {
+      display: block;
+      font-size: 0.9rem;
     }
 
     .install-header span {
+      display: block;
       font-size: 0.8rem;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-top: 0.15rem;
     }
 
     .copy-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--dim);
-      cursor: pointer;
-      padding: 0.25rem 0.6rem;
-      font-size: 0.75rem;
-      transition: color 0.15s, border-color 0.15s;
-    }
-
-    .copy-btn:hover {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.03);
       color: var(--fg);
-      border-color: var(--dim);
+      border-radius: 999px;
+      padding: 0.55rem 0.85rem;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
     }
 
     .copy-btn.copied {
-      color: var(--green);
-      border-color: var(--green);
+      color: #06120d;
+      background: var(--accent);
+      border-color: var(--accent);
     }
 
     .install-box pre {
       margin: 0;
-      padding: 1.2rem 1rem;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: clamp(0.85rem, 2vw, 1rem);
-      color: var(--fg);
+      padding: 1.1rem 1rem 1.2rem;
       overflow-x: auto;
       white-space: pre;
-      line-height: 1.5;
+      font: 0.9rem/1.65 var(--mono);
     }
 
-    .install-box pre .prompt {
-      color: var(--green);
+    .prompt {
+      color: var(--accent);
       user-select: none;
     }
 
-    .links {
-      margin-top: 2.5rem;
-      display: flex;
-      gap: 2rem;
+    .install-note {
+      margin-top: 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
     }
 
-    .links a {
+    .install-note code {
+      font-family: var(--mono);
+      color: var(--fg);
+      background: rgba(255, 255, 255, 0.06);
+      padding: 0.15rem 0.4rem;
+      border-radius: 6px;
+    }
+
+    .feature-grid {
+      margin-bottom: 2rem;
+    }
+
+    .feature-card {
+      padding: 1.5rem;
+    }
+
+    .feature-card ul {
+      list-style: none;
+      margin-top: 0.8rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .feature-card li::before {
+      content: ">";
       color: var(--accent);
-      text-decoration: none;
-      font-size: 0.95rem;
-      transition: opacity 0.15s;
-    }
-
-    .links a:hover {
-      opacity: 0.8;
-      text-decoration: underline;
+      font-family: var(--mono);
+      margin-right: 0.5rem;
     }
 
     footer {
-      margin-top: 4rem;
-      color: var(--dim);
-      font-size: 0.8rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 0 0.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
     }
 
-    .hint {
-      margin-top: 1.5rem;
-      margin-bottom: 0.75rem;
-      color: var(--dim);
-      font-size: 0.85rem;
-      text-align: center;
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
     }
 
-    .hint code {
-      color: var(--fg);
-      background: var(--surface);
-      padding: 0.1em 0.4em;
-      border-radius: 3px;
-      font-size: 0.85em;
+    @media (max-width: 960px) {
+      body {
+        padding: 1.25rem;
+      }
+
+      .install-grid,
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-copy,
+      .demo-section,
+      .install-section,
+      .feature-card {
+        border-radius: 18px;
+      }
     }
 
-    .install-box-alt {
-      max-width: 600px;
-      width: 100%;
+    @media (max-width: 640px) {
+      .site-header,
+      .section-head,
+      footer {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .hero-copy,
+      .demo-section,
+      .install-section,
+      .feature-card {
+        padding: 1.25rem;
+      }
+
+      .install-header {
+        align-items: start;
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
+  <div class="page">
+    <header class="site-header">
+      <a class="brand" href="https://try.gent/" aria-label="gent home">
+        <span class="brand-mark">&gt;</span>
+        <span>gent</span>
+      </a>
+      <nav class="header-links" aria-label="Primary">
+        <a href="https://github.com/pepegar/gent">GitHub</a>
+        <a href="https://github.com/pepegar/gent#the-idea">Docs</a>
+        <a href="https://github.com/pepegar/gent/releases">Releases</a>
+      </nav>
+    </header>
 
-  <div class="logo"><span>&gt;</span> gent</div>
-  <p class="tagline">The programmable coding agent.</p>
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <h1>Other coding agents stop at config files. <span class="hero-accent">gent</span> stays hackable, even at runtime.</h1>
+          <p class="lede">
+            Start with config files if you want. Then go further: reshape tools, hooks,
+            UI, commands, and agent behavior from inside the agent with Janet.
+          </p>
+          <div class="cta-row">
+            <a class="cta" href="#install">Install gent</a>
+            <a class="cta-secondary" href="https://github.com/pepegar/gent#the-idea">Learn how it works</a>
+          </div>
+        </div>
+      </section>
 
-  <div class="install-box">
-    <div class="install-header">
-      <span>Install</span>
-      <button class="copy-btn" onclick="copyInstall(this)">Copy</button>
-    </div>
-    <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh</pre>
+      <section class="demo-section" aria-label="gent demo">
+        <div class="cast-shell">
+          <script src="https://asciinema.org/a/oQsm81DARPwBu3ge.js" id="asciicast-oQsm81DARPwBu3ge" async="true"></script>
+          <noscript>
+            <a class="cast-fallback" href="https://asciinema.org/a/oQsm81DARPwBu3ge" target="_blank" rel="noreferrer">
+              <img src="https://asciinema.org/a/oQsm81DARPwBu3ge.svg" alt="gent asciinema cast">
+            </a>
+          </noscript>
+        </div>
+      </section>
+
+      <section class="install-section" id="install">
+        <div class="section-head">
+          <div>
+            <h2>Install in one command</h2>
+            <p>Get the latest stable release, or track <code>main</code> with nightly builds.</p>
+          </div>
+        </div>
+
+        <div class="install-grid">
+          <div class="install-box">
+            <div class="install-header">
+              <div>
+                <strong>Stable</strong>
+                <span>Latest tagged release</span>
+              </div>
+              <button class="copy-btn" type="button" data-copy="curl -sSf https://try.gent/install.sh | sh" data-default-label="Copy" onclick="copyCommand(this)">Copy</button>
+            </div>
+            <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh</pre>
+          </div>
+
+          <div class="install-box">
+            <div class="install-header">
+              <div>
+                <strong>Nightly</strong>
+                <span>Builds from <code>main</code></span>
+              </div>
+              <button class="copy-btn" type="button" data-copy="curl -sSf https://try.gent/install.sh | sh -s -- --nightly" data-default-label="Copy" onclick="copyCommand(this)">Copy</button>
+            </div>
+            <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh -s -- --nightly</pre>
+          </div>
+        </div>
+
+        <p class="install-note">
+          Want a custom install path? Use <code>sh -s -- --to ~/.local/bin</code>.
+        </p>
+      </section>
+
+      <section class="feature-grid" aria-label="gent differentiators">
+        <article class="feature-card">
+          <h2>Built to be modified</h2>
+          <p>gent is not just configurable. The agent runtime is scriptable, so the escape hatch is part of the product.</p>
+          <ul>
+            <li>Override built-in tools and add your own</li>
+            <li>Hook events before and after model or tool calls</li>
+            <li>Extend the terminal UI with custom widgets</li>
+          </ul>
+        </article>
+
+        <article class="feature-card">
+          <h2>A lisp machine for coding agents</h2>
+          <p>Rust handles the low-level syscalls. Janet owns the agent loop, tools, commands, UI, hooks, and configuration.</p>
+          <ul>
+            <li>Fast native core where it matters</li>
+            <li>High-leverage runtime where users need control</li>
+            <li>Designed for people who actually want to hack their tools</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <span>Open source · MIT · ship it, then reshape it</span>
+      <div class="footer-links">
+        <a href="https://github.com/pepegar/gent">GitHub</a>
+        <a href="https://github.com/pepegar/gent#the-idea">Docs</a>
+        <a href="https://github.com/pepegar/gent/releases">Releases</a>
+        <a href="https://try.gent/install.sh">Install script</a>
+      </div>
+    </footer>
   </div>
-
-  <p class="hint">Installs the latest stable release. For nightly builds from <code>main</code>:</p>
-  <div class="install-box install-box-alt">
-    <div class="install-header">
-      <span>Nightly</span>
-      <button class="copy-btn" onclick="copyNightly(this)">Copy</button>
-    </div>
-    <pre><span class="prompt">$ </span>curl -sSf https://try.gent/install.sh | sh -s -- --nightly</pre>
-  </div>
-
-  <div class="links">
-    <a href="https://github.com/pepegar/gent">GitHub</a>
-    <a href="https://github.com/pepegar/gent#the-idea">Docs</a>
-  </div>
-
-  <footer>Open source · MIT</footer>
 
   <script>
-    function copyInstall(btn) {
-      navigator.clipboard.writeText("curl -sSf https://try.gent/install.sh | sh");
-      btn.textContent = "Copied!";
-      btn.classList.add("copied");
-      setTimeout(() => {
-        btn.textContent = "Copy";
-        btn.classList.remove("copied");
+    function fallbackCopy(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      return copied;
+    }
+
+    function showCopyState(button, label) {
+      button.textContent = label;
+      button.classList.add("copied");
+      clearTimeout(button._copyTimer);
+      button._copyTimer = setTimeout(() => {
+        button.textContent = button.dataset.defaultLabel || "Copy";
+        button.classList.remove("copied");
       }, 2000);
     }
 
-    function copyNightly(btn) {
-      navigator.clipboard.writeText("curl -sSf https://try.gent/install.sh | sh -s -- --nightly");
-      btn.textContent = "Copied!";
-      btn.classList.add("copied");
-      setTimeout(() => {
-        btn.textContent = "Copy";
-        btn.classList.remove("copied");
-      }, 2000);
+    function copyCommand(button) {
+      const text = button.dataset.copy || "";
+      if (!text) return;
+
+      const onSuccess = () => showCopyState(button, "Copied!");
+      const onFailure = () => showCopyState(button, "Press Cmd/Ctrl+C");
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
+          fallbackCopy(text) ? onSuccess() : onFailure();
+        });
+      } else {
+        fallbackCopy(text) ? onSuccess() : onFailure();
+      }
     }
   </script>
-
 </body>
 </html>

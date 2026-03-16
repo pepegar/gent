@@ -1,0 +1,16 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" rx="36" fill="#09111F"/>
+  <rect x="78" y="66" width="1044" height="498" rx="28" fill="#0F1728" stroke="#22324D"/>
+
+  <rect x="122" y="110" width="86" height="86" rx="22" fill="#12233D" stroke="#2B5B4A"/>
+  <text x="165" y="168" text-anchor="middle" fill="#63FFA2" font-family="SFMono-Regular, Menlo, monospace" font-size="42" font-weight="700">&gt;</text>
+  <text x="234" y="166" fill="#EFF5FF" font-family="Avenir Next, Segoe UI, sans-serif" font-size="48" font-weight="700" letter-spacing="0.06em">gent</text>
+
+  <text x="122" y="262" fill="#EFF5FF" font-family="Iowan Old Style, Palatino Linotype, serif" font-size="70" font-weight="700">
+    <tspan x="122" dy="0">Other coding agents stop at</tspan>
+    <tspan x="122" dy="84">config files. gent stays</tspan>
+    <tspan x="122" dy="84">hackable, even at runtime.</tspan>
+  </text>
+
+  <text x="122" y="490" fill="#63FFA2" font-family="Avenir Next, Segoe UI, sans-serif" font-size="50" font-weight="700" letter-spacing="0.01em">https://try.gent</text>
+</svg>
