@@ -252,9 +252,19 @@
   n)
 
 (var- thinking-state @{:active false :buf @"" :visible false :char-count 0})
+# scrollback-dirty tracks what changed since last render:
+#   false    — nothing changed
+#   :append  — only new lines appended at the bottom (no existing rows mutated)
+#   true     — existing rows modified or removed (full re-render required)
 (var- scrollback-dirty true)
 (var- prev-y-offset -1)
 (var- prev-render-height -1)
+
+(defn- mark-dirty-append
+  "Upgrade dirty flag to :append unless it is already true (full-dirty)."
+  []
+  (when (not scrollback-dirty)
+    (set scrollback-dirty :append)))
 
 # ── Bash progress (live output) ────────────────────────────────
 # When a bash command is running and emitting :partial output, we show
@@ -585,10 +595,13 @@
   (def new-line @{:text text :style style})
   (when wrap-indent (put new-line :wrap-indent wrap-indent))
   (array/push scrollback new-line)
-  (set scrollback-dirty true)
+  (mark-dirty-append)
   (when (> cached-vrows-width 0)
     (def ew (effective-width new-line cached-vrows-width))
-    (set cached-total-vrows (+ cached-total-vrows (count-visual-rows new-line ew))))
+    (def nvr (count-visual-rows new-line ew))
+    (set cached-total-vrows (+ cached-total-vrows nvr))
+    (when (= scroll-offset 0)
+      (set stream-new-vrows (+ stream-new-vrows nvr))))
   (when (> scroll-offset 0)
     (def w (widget/get-widget :chat))
     (def width (if (and w (w :rect)) ((w :rect) :width) 80))
@@ -612,7 +625,7 @@
   (when (and (> (length spans) 1) (get (first spans) :text))
     (put new-line :wrap-indent (tui/string-width ((first spans) :text))))
   (array/push scrollback new-line)
-  (set scrollback-dirty true)
+  (mark-dirty-append)
   (when (> cached-vrows-width 0)
     (def ew (effective-width new-line cached-vrows-width))
     (def nvr (count-visual-rows new-line ew))
@@ -1005,10 +1018,13 @@
           @{:text text :style style :progress true :row-style :tool-row-bg}))
       @{:text text :style style :progress true :row-style :tool-row-bg}))
   (array/push scrollback new-line)
-  (set scrollback-dirty true)
+  (mark-dirty-append)
   (when (> cached-vrows-width 0)
     (def ew (effective-width new-line cached-vrows-width))
-    (set cached-total-vrows (+ cached-total-vrows (count-visual-rows new-line ew))))
+    (def nvr (count-visual-rows new-line ew))
+    (set cached-total-vrows (+ cached-total-vrows nvr))
+    (when (= scroll-offset 0)
+      (set stream-new-vrows (+ stream-new-vrows nvr))))
   (widget/mark-dirty :chat))
 
 (defn update-bash-progress
@@ -1851,28 +1867,72 @@
     (tui/buffer-set-string buf x y-base frame style)
     (tui/buffer-set-string buf (+ x spinner-gent-width 1) y-base msg style))
 
-  # Streaming dirty-row optimization: when scrollback hasn't changed and
-  # the visual layout is stable, only the partial line and spinner rows
-  # need diffing. Mark all other rows clean so the Rust diff skips them.
+  # Streaming dirty-row optimization: avoid diffing the full ~30-40 row chat
+  # buffer on every frame during streaming.  We exploit two invariants:
+  #
+  #   sb-dirty = false   — scrollback unchanged; only partial/spinner rows need
+  #                        diffing.
+  #   sb-dirty = :append — new lines were appended at the bottom but no existing
+  #                        rows were mutated.  The top portion of the viewport is
+  #                        unchanged; only the newly-arrived bottom rows, the
+  #                        partial line, and the spinner rows need diffing.
+  #   sb-dirty = true    — existing rows were modified (thinking block toggle,
+  #                        progress line replacement, etc.); skip the optimization
+  #                        and let the Rust diff handle everything.
+  #
+  # The count of new visual rows is carried in stream-new-vrows, which is reset
+  # here after we consume it.
   (def sb-dirty scrollback-dirty)
   (set scrollback-dirty false)
+  (def new-vrows stream-new-vrows)
+  (set stream-new-vrows 0)
   (when (and (buf :dirty-rows)
              (stream-state :active)
              (= scroll-offset 0)
-             (not sb-dirty)
-             (= y-offset prev-y-offset)
+             (not= sb-dirty true)
              (= render-height prev-render-height))
     (def dr (buf :dirty-rows))
     (def dr-len (length dr))
-    (for i 0 dr-len (put dr i false))
-    (when has-partial
-      (def partial-row (- (+ y-offset visible-count) (rect :y)))
-      (when (and (>= partial-row 0) (< partial-row dr-len))
-        (put dr partial-row true)))
-    (when has-spinner
-      (def spinner-start (- height spinner-height))
-      (for i spinner-start height
-        (when (< i dr-len) (put dr i true)))))
+    (cond
+      (= sb-dirty false)
+      # Nothing in scrollback changed — clean every row, then mark
+      # only partial and spinner rows dirty.
+      (do
+        (for i 0 dr-len (put dr i false))
+        (when has-partial
+          (def partial-row (- (+ y-offset visible-count) (rect :y)))
+          (when (and (>= partial-row 0) (< partial-row dr-len))
+            (put dr partial-row true)))
+        (when has-spinner
+          (def spinner-start (- height spinner-height))
+          (for i spinner-start height
+            (when (< i dr-len) (put dr i true)))))
+
+      (and (= sb-dirty :append) (> y-offset 0) (= y-offset prev-y-offset))
+      # New lines appended into empty space above the bottom (y-offset > 0
+      # means the viewport was not yet full).  Nothing above the new rows
+      # shifted, so only the newly-arrived bottom rows need diffing.
+      (do
+        (for i 0 dr-len (put dr i false))
+        # Mark the new visual rows that appeared at the bottom of the
+        # content area.  new-vrows counts visual rows added; they map to
+        # the last new-vrows slots of the rendered content.
+        (when (> new-vrows 0)
+          (def first-new-row (- (+ y-offset visible-count) new-vrows))
+          (def content-end (+ y-offset visible-count))
+          (var r (max 0 (- first-new-row (rect :y))))
+          (def end-r (min dr-len (- content-end (rect :y))))
+          (while (< r end-r)
+            (put dr r true)
+            (++ r)))
+        (when has-partial
+          (def partial-row (- (+ y-offset visible-count) (rect :y)))
+          (when (and (>= partial-row 0) (< partial-row dr-len))
+            (put dr partial-row true)))
+        (when has-spinner
+          (def spinner-start (- height spinner-height))
+          (for i spinner-start height
+            (when (< i dr-len) (put dr i true)))))))
   (set prev-y-offset y-offset)
   (set prev-render-height render-height))
 

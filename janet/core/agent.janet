@@ -682,10 +682,6 @@
       # 5. Update all widgets (chat drains stream, polls tools)
                                                    (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
 
-      # 5b. Drain stream scroll counter (consumed but not used for scroll-region
-      # optimization during streaming — the buffer-reset-dirty path handles it)
-                                                   (chat/drain-stream-scroll)
-
       # 6. Tick widget timers
                                                    (profile/with-span "widget:tick-timers" "timer" (fn [] (widget/tick-timers)))
 
