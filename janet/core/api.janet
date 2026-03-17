@@ -36,6 +36,37 @@
 (var- provider-models @{})
 (var- pending-env-model (os/getenv "GENT_MODEL"))
 
+(def- openai-api-url "https://api.openai.com/v1/responses")
+(def- openai-codex-url "https://chatgpt.com/backend-api/codex/responses")
+
+(defn- openai-codex-token? [token]
+  "Heuristically detect ChatGPT OAuth access tokens from their JWT shape."
+  (and (string? token)
+       (not (nil? (auth/openai-decode-jwt token)))))
+
+(defn- resolve-provider-default-url [id p]
+  "Resolve the provider URL, honoring explicit env overrides first."
+  (when-let [env-url (os/getenv "GENT_API_URL")]
+    (break env-url))
+  (when (not= id "openai")
+    (break (p :default-url)))
+
+  # OpenAI supports both ChatGPT OAuth tokens and API keys.
+  # Route API keys to api.openai.com and OAuth access tokens to ChatGPT Codex.
+  (when-let [explicit-key (config :api-key)]
+    (break (if (openai-codex-token? explicit-key) openai-codex-url openai-api-url)))
+  (when-let [gent-key (os/getenv "GENT_API_KEY")]
+    (break (if (openai-codex-token? gent-key) openai-codex-url openai-api-url)))
+
+  (when-let [cred (auth/get-credential "openai")]
+    (def cred-type (get cred "type" (get cred :type)))
+    (break (if (= cred-type "oauth") openai-codex-url openai-api-url)))
+
+  (when (auth/get-env-key "openai")
+    (break openai-api-url))
+
+  openai-codex-url)
+
 (defn register-api-provider
   "Register an API provider backend. provider is a table with :id and provider functions."
   [provider]
@@ -58,7 +89,7 @@
   (def p (get providers id))
   (unless p (error (string "Unknown API provider: " id)))
   (set active-provider-id id)
-  (put config :url (or (os/getenv "GENT_API_URL") (p :default-url)))
+  (put config :url (resolve-provider-default-url id p))
   (def model
     (cond
       (get provider-models id) (get provider-models id)
@@ -121,8 +152,9 @@
     (put result :api-key-source
       (cond
         (config :api-key) "explicit (set-api-key)"
-        (auth/has-credential? auth-provider) "auth.json"
         (os/getenv "GENT_API_KEY") "GENT_API_KEY"
+        (auth/has-credential? auth-provider) "auth.json"
+        (os/getenv "OPENAI_API_KEY") "OPENAI_API_KEY"
         (os/getenv "ANTHROPIC_API_KEY") "ANTHROPIC_API_KEY"
         "unknown"))
     (put result :api-key

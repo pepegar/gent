@@ -3,6 +3,7 @@
 (import test/helper :as t)
 (import core/providers/openai :as openai)
 (import core/api :as api)
+(import core/auth :as auth)
 
 (print "── openai provider ──")
 
@@ -255,6 +256,40 @@
 
     (api/set-provider "anthropic")
     (t/assert= "claude-opus-4-20250514" (get (api/get-config) :model))))
+
+(t/test "set-provider routes OpenAI api_key credentials to api.openai.com"
+  (fn []
+    (def old-cred (auth/get-credential "openai"))
+    (def old-provider (api/get-active-provider-id))
+    (defer
+      (do
+        (if old-cred
+          (auth/set-credential "openai" old-cred)
+          (auth/remove-credential "openai"))
+        (when old-provider
+          (api/set-provider old-provider))))
+    (auth/set-credential "openai" @{"type" "api_key" "key" "sk-test-key"})
+    (api/set-provider "openai")
+    (t/assert= "https://api.openai.com/v1/responses" (get (api/get-config) :url))))
+
+(t/test "set-provider routes OpenAI oauth credentials to ChatGPT Codex"
+  (fn []
+    (def old-cred (auth/get-credential "openai"))
+    (def old-provider (api/get-active-provider-id))
+    (defer
+      (do
+        (if old-cred
+          (auth/set-credential "openai" old-cred)
+          (auth/remove-credential "openai"))
+        (when old-provider
+          (api/set-provider old-provider))))
+    (auth/set-credential "openai"
+      @{"type" "oauth"
+        "access" "eyJhbGciOiJSUzI1NiJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdF90ZXN0MTIzIn19.signature"
+        "refresh" "rt"
+        "expires" 9999999999999})
+    (api/set-provider "openai")
+    (t/assert= "https://chatgpt.com/backend-api/codex/responses" (get (api/get-config) :url))))
 
 (t/test "set-provider rejects unknown provider"
   (fn []

@@ -1333,35 +1333,50 @@
       (string/has-prefix? "status 403" msg)
       (and (string? msg) (string/find "authentication_error" msg))))
 
+(defn- cleanup-failed-stream-start []
+  "Roll back optimistic stream UI state when stream-start throws synchronously."
+  (when stream-span-id
+    (profile/end stream-span-id)
+    (set stream-span-id nil))
+  (stream-end-output)
+  (spinner-stop)
+  (set stream-ctx nil)
+  (set mode :idle)
+  (set auth-retry-pending false))
+
 (defn- start-streaming [conversation effective-prompt]
   (hooks/run :before-send conversation)
   (stream-start-output)
   (spinner-start "thinking…")
   (set stream-span-id (profile/begin "stream:api-call" "stream"))
   (def ctx
-    ((provider :stream-start)
-     conversation
-     (tools/definitions)
-     @{:on-text (fn [text]
-                 (when (thinking-state :active) (thinking-end-block))
-                 (when (spinner-active?) (spinner-stop))
-                 (stream-delta text))
-       :on-thinking (fn [text]
-                     (thinking-delta text))
-       :on-tool-start (fn [name]
-                       (stream-end-output)
-                       (spinner-start (string "streaming " name " arguments…")))
-       :on-tool-delta (fn [name nbytes]
-                       (def size-str
-                         (if (>= nbytes 1024)
-                           (string/format "%.1fKB" (/ nbytes 1024))
-                           (string nbytes "B")))
-                       (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
-       :on-error (fn [err]
-                  (spinner-stop)
-                  (output-error (string "Stream error: " err))
-                  (hooks/run :on-error err))}
-      effective-prompt))
+    (try
+      ((provider :stream-start)
+       conversation
+       (tools/definitions)
+       @{:on-text (fn [text]
+                   (when (thinking-state :active) (thinking-end-block))
+                   (when (spinner-active?) (spinner-stop))
+                   (stream-delta text))
+         :on-thinking (fn [text]
+                       (thinking-delta text))
+         :on-tool-start (fn [name]
+                         (stream-end-output)
+                         (spinner-start (string "streaming " name " arguments…")))
+         :on-tool-delta (fn [name nbytes]
+                         (def size-str
+                           (if (>= nbytes 1024)
+                             (string/format "%.1fKB" (/ nbytes 1024))
+                             (string nbytes "B")))
+                         (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
+         :on-error (fn [err]
+                    (spinner-stop)
+                    (output-error (string "Stream error: " err))
+                    (hooks/run :on-error err))}
+        effective-prompt)
+      ([err]
+       (cleanup-failed-stream-start)
+       (error err))))
   (set stream-ctx ctx)
   (set mode :streaming))
 

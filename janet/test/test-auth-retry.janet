@@ -76,6 +76,7 @@
   (widget/set-layout-fn default-layout)
   (widget/do-layout (tui/rect 0 0 cols rows))
   (widget/focus :editor)
+  (api/set-provider "anthropic")
   (conv/init))
 
 (defn- setup-auth-credential []

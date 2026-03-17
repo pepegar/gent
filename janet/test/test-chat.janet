@@ -11,6 +11,7 @@
 (import widgets/chat :as chat)
 (import core/widget :as widget)
 (import core/conversation :as conv)
+(import core/api :as api)
 (import tui)
 (import test/helper :as t)
 
@@ -294,6 +295,27 @@
 (t/test "active? is false when idle" (fn []
                                       (setup)
                                       (t/assert-falsy (chat/active?))))
+
+(t/test "submit cleans up optimistic stream UI on synchronous start failure" (fn []
+                                                                              (def w (setup))
+                                                                              (conv/init)
+                                                                              (chat/set-provider
+                                                                                @{:stream-start (fn [& _] (error "boom"))
+                                                                                  :stream-read (fn [_] nil)
+                                                                                  :stream-stop (fn [_] nil)})
+                                                                              (defer
+                                                                                (do
+                                                                                  (chat/set-provider
+                                                                                    @{:stream-start (fn [conv tools cbs &opt sys]
+                                                                                                     (api/stream-start conv tools cbs sys))
+                                                                                      :stream-read (fn [stream-id]
+                                                                                                    (http/stream-read stream-id))
+                                                                                      :stream-stop (fn [stream-id]
+                                                                                                    (http/stream-stop stream-id))})
+                                                                                  (chat/reset-state)))
+                                                                              (chat/submit "hello")
+                                                                              (t/assert= (chat/get-mode) :idle)
+                                                                              (t/assert-falsy ((chat/get-spinner-state) :active))))
 
 (t/test "conversation clear hook clears scrollback" (fn []
                                                      (setup)
