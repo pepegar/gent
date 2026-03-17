@@ -222,18 +222,39 @@
 
 (t/test "set-provider to openai changes config"
   (fn []
-    # Save current state
-    (def old-cfg (api/get-config))
-    # Switch to openai
+    # Seed deterministic per-provider models first.
+    (api/set-provider "anthropic")
+    (api/set-model "claude-sonnet-4-20250514")
     (api/set-provider "openai")
+    (api/set-model "gpt-5.1")
+
+    # Switching back to openai should restore its model.
     (def cfg (api/get-config))
     (t/assert= "openai" (cfg :provider))
     (t/assert= "gpt-5.1" (cfg :model))
+
     # Switch back
     (api/set-provider "anthropic")
     (def cfg2 (api/get-config))
     (t/assert= "anthropic" (cfg2 :provider))
     (t/assert= "claude-sonnet-4-20250514" (cfg2 :model))))
+
+(t/test "set-provider restores last model per provider"
+  (fn []
+    (api/set-provider "openai")
+    (api/set-model "gpt-5.4")
+    (t/assert= "gpt-5.4" (get (api/get-config) :model))
+
+    (api/set-provider "anthropic")
+    (t/assert= "claude-sonnet-4-20250514" (get (api/get-config) :model))
+    (api/set-model "claude-opus-4-20250514")
+    (t/assert= "claude-opus-4-20250514" (get (api/get-config) :model))
+
+    (api/set-provider "openai")
+    (t/assert= "gpt-5.4" (get (api/get-config) :model))
+
+    (api/set-provider "anthropic")
+    (t/assert= "claude-opus-4-20250514" (get (api/get-config) :model))))
 
 (t/test "set-provider rejects unknown provider"
   (fn []

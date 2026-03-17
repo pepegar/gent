@@ -33,6 +33,8 @@
 
 (var- providers @{})
 (var- active-provider-id nil)
+(var- provider-models @{})
+(var- pending-env-model (os/getenv "GENT_MODEL"))
 
 (defn register-api-provider
   "Register an API provider backend. provider is a table with :id and provider functions."
@@ -50,13 +52,27 @@
   (sort-by |($ :id) (values providers)))
 
 (defn set-provider
-  "Switch to a different API provider. Resets model/url to provider defaults."
+  "Switch to a different API provider. Restores the provider's last model
+   selection, or falls back to its default model the first time."
   [id]
   (def p (get providers id))
   (unless p (error (string "Unknown API provider: " id)))
   (set active-provider-id id)
   (put config :url (or (os/getenv "GENT_API_URL") (p :default-url)))
-  (put config :model (or (os/getenv "GENT_MODEL") (p :default-model)))
+  (def model
+    (cond
+      (get provider-models id) (get provider-models id)
+      pending-env-model
+      (do
+        (def env-model pending-env-model)
+        (set pending-env-model nil)
+        (put provider-models id env-model)
+        env-model)
+      true
+      (do
+        (put provider-models id (p :default-model))
+        (p :default-model))))
+  (put config :model model)
   (when (p :default-max-tokens)
     (put config :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
                               (if env (scan-number env) (p :default-max-tokens))))))
@@ -74,7 +90,10 @@
 # ── Config setters ───────────────────────────────────────────
 
 (defn set-url [url] (put config :url url))
-(defn set-model [m] (put config :model m))
+(defn set-model [m]
+  (put config :model m)
+  (when active-provider-id
+    (put provider-models active-provider-id m)))
 (defn set-max-tokens [n] (put config :max-tokens n))
 (defn set-thinking-enabled [v] (put config :thinking-enabled (truthy? v)))
 (defn set-thinking-budget [n] (put config :thinking-budget n))
