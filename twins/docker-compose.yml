@@ -1,0 +1,24 @@
+services:
+  anthropic:
+    build:
+      context: .
+      dockerfile: anthropic/Dockerfile
+    ports:
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/__control/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 3
+
+  openai:
+    build:
+      context: .
+      dockerfile: openai/Dockerfile
+    ports:
+      - "18081:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/__control/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 3
