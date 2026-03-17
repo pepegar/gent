@@ -13,3 +13,12 @@ def anthropic_client():
     client = TestClient(app)
     yield client
     control.reset()
+
+
+@pytest.fixture
+def openai_client():
+    from openai.main import app, control
+    control.reset()
+    client = TestClient(app)
+    yield client
+    control.reset()
