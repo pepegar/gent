@@ -2,8 +2,12 @@
 #
 # Usage (from project root): janet janet/test/run.janet
 
-# Set sessions directory to a temp location to avoid polluting ~/.gent/sessions
-(os/setenv "GENT_SESSIONS_DIR" "/tmp/gent-test-sessions")
+# Set HOME and sessions directory to temp locations to avoid touching real ~/.gent state.
+(def test-run-id (math/floor (* (os/clock) 1000000)))
+(def test-home (string "/tmp/gent-test-home-" test-run-id))
+(os/mkdir test-home)
+(os/setenv "HOME" test-home)
+(os/setenv "GENT_SESSIONS_DIR" (string test-home "/sessions"))
 
 # Find the janet/ directory
 (def janet-dir

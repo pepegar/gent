@@ -184,6 +184,55 @@
     (def cred @{"accountId" "acct_xyz"})
     (t/assert= "acct_xyz" (auth/openai-get-account-id cred))))
 
+(t/test "reload loads credentials from auth.json in isolated HOME"
+  (fn []
+    (def home (os/getenv "HOME"))
+    (def gent-dir (string home "/.gent"))
+    (def auth-path (string gent-dir "/auth.json"))
+    (def old-content (when (os/stat auth-path) (slurp auth-path)))
+    (defer
+      (do
+        (if old-content
+          (spit auth-path old-content)
+          (when (os/stat auth-path)
+            (os/rm auth-path)))
+        (auth/reload)))
+    (when (not (os/stat gent-dir))
+      (os/mkdir gent-dir))
+    (spit auth-path "{\"openai\":{\"type\":\"api_key\",\"key\":\"sk-from-disk\"}}")
+    (auth/reload)
+    (def cred (auth/get-credential "openai"))
+    (t/assert= "api_key" (get cred "type"))
+    (t/assert= "sk-from-disk" (get cred "key"))))
+
+(t/test "login preserves struct credentials before persisting"
+  (fn []
+    (def provider-id "openai")
+    (def provider (auth/get-oauth-provider provider-id))
+    (def old-login (provider :login))
+    (def old-cred (auth/get-credential provider-id))
+    (defer
+      (do
+        (put provider :login old-login)
+        (if old-cred
+          (auth/set-credential provider-id old-cred)
+          (auth/remove-credential provider-id))
+        (auth/reload)))
+    (put provider :login
+         (fn [_]
+           {:access "struct-access"
+            :refresh "struct-refresh"
+            :expires 12345}))
+    (def cred (auth/login provider-id @{}))
+    (t/assert= "oauth" (get cred "type"))
+    (t/assert= "struct-access" (get cred "access"))
+    (t/assert= "struct-refresh" (get cred "refresh"))
+    (auth/reload)
+    (def stored (auth/get-credential provider-id))
+    (t/assert= "oauth" (get stored "type"))
+    (t/assert= "struct-access" (get stored "access"))
+    (t/assert= "struct-refresh" (get stored "refresh"))))
+
 # ── Callback server polling (mocked net) ─────────────────────────
 
 (t/test "openai-poll-callback returns code on valid request"

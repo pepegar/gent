@@ -92,8 +92,16 @@
       (eachp [k v] val
         (def str-key (if (keyword? k) (string k) k))
         (put result str-key (stringify-keys v)))
-      result)
-    val))
+	      result)
+	    val))
+
+(defn- object->table
+  "Copy a table or struct into a fresh table."
+  [val]
+  (def result @{})
+  (eachp [k v] val
+    (put result k v))
+  result)
 
 (defn- read-auth-file []
   "Read and parse auth.json. Returns a table or empty table on error."
@@ -102,9 +110,9 @@
       (do
         (def content (slurp auth-path))
         (def parsed (json/decode content))
-        (def tbl (if (table? parsed) parsed
-                     (if (struct? parsed) (table ;(kvs parsed))
-                         @{})))
+        (def tbl (if (or (table? parsed) (struct? parsed))
+                   (object->table parsed)
+                   @{}))
         # json/decode uses keyword keys, but auth code expects string keys
         (stringify-keys tbl))
       ([err]
@@ -320,8 +328,8 @@
   (unless provider
     (error (string "Unknown OAuth provider: " provider-id)))
   (def credentials ((provider :login) callbacks))
-  (def cred-table (if (struct? credentials)
-                    (table ;(kvs credentials))
+  (def cred-table (if (or (table? credentials) (struct? credentials))
+                    (stringify-keys (object->table credentials))
                     credentials))
   (put cred-table "type" "oauth")
   (set-credential provider-id cred-table)
