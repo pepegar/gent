@@ -23,10 +23,10 @@
   @{:url (or (os/getenv "GENT_API_URL") "https://api.anthropic.com/v1/messages")
     :model (or (os/getenv "GENT_MODEL") "claude-sonnet-4-20250514")
     :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
-                  (if env (scan-number env) 8192))
+                  (if env (scan-number env) 32000))
     :api-key nil  # nil means "resolve dynamically via auth module"
     :thinking-enabled true
-    :thinking-budget 4096})
+    :thinking-budget 16000})
 
 # ── Provider registry ────────────────────────────────────────
 
@@ -269,7 +269,7 @@
     :auth-provider "anthropic"
     :default-url "https://api.anthropic.com/v1/messages"
     :default-model "claude-sonnet-4-20250514"
-    :default-max-tokens 8192
+    :default-max-tokens 32000
     :build-headers anthropic/build-headers
     :convert-tools anthropic/convert-tools
     :build-body anthropic/build-body
