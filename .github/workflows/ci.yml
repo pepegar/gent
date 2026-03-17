@@ -89,3 +89,59 @@ jobs:
           bash test/tui-wright-focus.sh
           bash test/tui-wright-model.sh
           bash test/tui-wright-profile.sh
+
+  twin:
+    name: Twin E2E ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-${{ runner.os }}-native
+
+      - name: Build
+        run: cargo build
+
+      - name: Install tui-wright
+        shell: bash
+        run: |
+          if ! command -v tui-wright >/dev/null 2>&1; then
+            cargo install --git https://github.com/pepegar/tui-wright --rev f565303f0af6115a403f9b600a97f50cc59ef3dd
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: twins/requirements.txt
+
+      - name: Twin unit tests
+        run: |
+          cd twins
+          pip install -r requirements.txt
+          python -m pytest tests/ -v
+
+      - name: Start digital twin containers
+        run: docker compose -f twins/docker-compose.yml up -d --wait
+
+      - name: Twin E2E tests
+        run: |
+          bash test/twin-e2e.sh
+          bash test/twin-auth.sh
+          bash test/twin-provider-switch.sh
+          bash test/twin-error-handling.sh
+
+      - name: Stop twin containers
+        if: always()
+        run: docker compose -f twins/docker-compose.yml down
