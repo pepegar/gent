@@ -65,6 +65,14 @@
         (min c (- total used))))
     (array/push sizes (max 0 sz))
     (+= used (max 0 sz)))
+  # Ensure we allocate the entire available space. Due to flooring when
+  # computing percentage-based sizes we can end up with unassigned columns
+  # or rows; give any leftover cells to the last segment.
+  (def remaining (- total used))
+  (when (> remaining 0)
+    (def last-idx (dec (length sizes)))
+    (when (>= last-idx 0)
+      (put sizes last-idx (+ (get sizes last-idx) remaining))))
   sizes)
 
 (defn vsplit
