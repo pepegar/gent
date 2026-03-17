@@ -112,6 +112,44 @@ cargo build && janet janet/test/run.janet
 
 Fix all compilation errors and test failures before considering the work done. Do not skip this step.
 
+### Digital Twin (DTU) tests
+
+The `twins/` directory contains Python (FastAPI) servers that behaviorally clone the Anthropic and OpenAI APIs. They run in Docker containers and enable full HTTP path testing — headers, auth, request bodies, SSE streaming, error handling.
+
+**Python unit tests** (no Docker needed):
+
+```sh
+cd twins && python3 -m pytest tests/ -v
+```
+
+**E2E tests** (requires Docker + tui-wright):
+
+```sh
+bash test/twin-all.sh
+```
+
+This starts the twin containers, runs all Python unit tests, Janet tests, and 5 E2E test suites that verify the full HTTP path through real gent sessions.
+
+Individual E2E scripts:
+
+- `test/twin-e2e.sh` — Full round-trip (enqueue → request → SSE → TUI)
+- `test/twin-auth.sh` — Auth header verification + 401 rejection
+- `test/twin-provider-switch.sh` — Anthropic vs OpenAI wire format
+- `test/twin-error-handling.sh` — HTTP error codes + recovery
+- `test/twin-error-scenarios.sh` — Comprehensive error scenarios (403, 500, 529, tool calls, thinking, multi-turn)
+
+The twins expose a control plane for scripting responses:
+
+```sh
+# Enqueue a response
+curl -X POST http://localhost:18080/__control/enqueue \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"text","content":"Hello!"}'
+
+# Inspect captured requests
+curl http://localhost:18080/__control/requests
+```
+
 ### Rust tests
 
 ```sh
