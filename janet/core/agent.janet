@@ -28,6 +28,7 @@
 (import core/dialog :as dialog)
 (import core/profile :as profile)
 (import core/rpc-server :as rpc-srv)
+(import core/selector :as selector)
 (import core/sessions-explorer :as sessions-explorer)
 
 # ── Layout ─────────────────────────────────────────────────────
@@ -283,6 +284,29 @@
       # Render sessions explorer overlay (if active)
       (when (and screen-area (sessions-explorer/active?))
         (def popup (sessions-explorer/render-overlay screen-area))
+        (when popup
+          (set popup-was-visible true)
+          (def parts @[])
+          (var cur-style nil)
+          (each cell (popup :cells)
+            (def x (cell :x))
+            (def y (cell :y))
+            (array/push parts (string/format "\x1b[%d;%dH" (+ y 1) (+ x 1)))
+            (def st (cell :style))
+            (when (not (tui/style= st cur-style))
+              (array/push parts "\x1b[0m")
+              (def sgr (tui/style->sgr st))
+              (when (not= sgr "") (array/push parts sgr))
+              (set cur-style st))
+            (array/push parts (cell :ch))
+            (tui/buffer-set-char prev-buf x y (cell :ch) st))
+          (when (not (empty? parts))
+            (array/push parts "\x1b[0m")
+            (buffer/push frame-out (string ;parts)))))
+
+      # Render generic selector overlay (if active)
+      (when (and screen-area (selector/active?))
+        (def popup (selector/render-overlay screen-area))
         (when popup
           (set popup-was-visible true)
           (def parts @[])

@@ -44,6 +44,11 @@
   [id]
   (get providers id))
 
+(defn list-providers
+  "Return registered providers sorted by ID."
+  []
+  (sort-by |($ :id) (values providers)))
+
 (defn set-provider
   "Switch to a different API provider. Resets model/url to provider defaults."
   [id]

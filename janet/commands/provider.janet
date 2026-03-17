@@ -2,6 +2,32 @@
 
 (import core/commands :as commands)
 (import core/api :as api)
+(import core/selector :as selector)
+
+(defn- switch-provider [name]
+  (api/set-provider name)
+  (def cfg (api/get-config))
+  (string "Switched to provider: " name
+          "\n  model: " (get cfg :model)
+          "\n  url: " (get cfg :url)))
+
+(defn- open-provider-selector []
+  (def current-provider (api/get-active-provider-id))
+  (selector/open
+    {:title "Providers"
+     :items
+     (map (fn [provider]
+            (def id (provider :id))
+            (def name (provider :name))
+            @{:id id
+              :label id
+              :detail (string name " · " (provider :default-model))
+              :search-text (string id " " name " " (provider :default-model))
+              :current (= id current-provider)})
+          (api/list-providers))
+     :empty-text "No providers available."
+     :on-submit (fn [item] (switch-provider (item :id)))})
+  "")
 
 (commands/register "provider"
   {:description "Show or switch API provider"
@@ -12,22 +38,9 @@
      (if (not= name "")
        (do
          (try
-           (do
-             (api/set-provider name)
-             (def cfg (api/get-config))
-             (string "Switched to provider: " name
-                     "\n  model: " (get cfg :model)
-                     "\n  url: " (get cfg :url)))
+           (switch-provider name)
            ([err]
-            (def providers @["anthropic" "openai"])
+            (def providers (map |($ :id) (api/list-providers)))
             (string "Error: " (string err)
                     "\nAvailable providers: " (string/join providers ", ")))))
-       (do
-         (def cfg (api/get-config))
-         (def provider-id (api/get-active-provider-id))
-         (def p (api/get-active-provider))
-         (def lines @[(string "Active provider: " provider-id
-                              (if p (string " (" (p :name) ")") ""))
-                      (string "  model: " (get cfg :model))
-                      (string "  url: " (get cfg :url))])
-         (string/join lines "\n"))))})
+       (open-provider-selector)))})

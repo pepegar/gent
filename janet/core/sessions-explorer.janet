@@ -157,8 +157,13 @@
   (if (or (nil? q) (= "" q))
     items
     (do
-      (def labels (map |(format-row $ "") items))
-      (def matches (fuzzy/filter-sort labels q))
+      (var matches @[])
+      (for i 0 (length items)
+        (def item (get items i))
+        (def s (fuzzy/score (format-row item "") q))
+        (when s
+          (array/push matches {:index i :score s})))
+      (set matches (sort-by |(get-in $ [:score :score] math/inf) matches))
       (map |(get items ($ :index)) matches))))
 
 (defn- rebuild-flat-list

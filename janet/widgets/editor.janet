@@ -11,6 +11,7 @@
 (import widgets/editor_new :as ed)
 (import core/completion :as completion)
 (import core/dialog :as dialog)
+(import core/selector :as selector)
 (import core/sessions-explorer :as sessions-explorer)
 (import core/input-history :as ih)
 (import core/widget :as widget)
@@ -197,6 +198,10 @@
 
       # ── Sessions explorer key interception ─────────────────
       # When the sessions explorer is active, route keys to it.
+             (when (selector/active?)
+               (selector/handle-key event)
+               (break nil))
+
              (when (sessions-explorer/active?)
                (sessions-explorer/handle-key event)
                (break nil))

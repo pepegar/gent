@@ -1,6 +1,7 @@
 # Tests for /model command and api/list-models
 (import core/api :as api)
 (import core/commands :as commands)
+(import core/selector :as selector)
 (import test/helper :as t)
 (import test/fake-http :as fake)
 
@@ -30,27 +31,49 @@
                                           (t/assert= (get cfg :model) "claude-opus-4-20250514")
                                           (api/set-model "claude-sonnet-4-20250514")))
 
-(t/test "/model with no args lists models" (fn []
-                                            (fake/queue-request-response
-                                              (json/encode @{:data @[@{:id "claude-sonnet-4-20250514"
-                                                                        :display_name "Claude Sonnet 4"
-                                                                        :type "model"}
-                                                                     @{:id "claude-opus-4-20250514"
-                                                                        :display_name "Claude Opus 4"
-                                                                        :type "model"}]
-                                                             :has_more false}))
-                                            (def result (commands/dispatch "/model"))
-                                            (t/assert-truthy (get result :handled))
-                                            (def output (get result :result))
-                                            (t/assert-truthy (string/find "claude-sonnet-4-20250514" output))
-                                            (t/assert-truthy (string/find "claude-opus-4-20250514" output))
-                                            (t/assert-truthy (string/find "*" output))))
+(t/test "/model with no args opens selector" (fn []
+                                              (selector/reset-state)
+                                              (fake/queue-request-response
+                                                (json/encode @{:data @[@{:id "claude-sonnet-4-20250514"
+                                                                          :display_name "Claude Sonnet 4"
+                                                                          :type "model"}
+                                                                       @{:id "claude-opus-4-20250514"
+                                                                          :display_name "Claude Opus 4"
+                                                                          :type "model"}]
+                                                               :has_more false}))
+                                              (def result (commands/dispatch "/model"))
+                                              (t/assert-truthy (get result :handled))
+                                              (t/assert= (get result :result) "")
+                                              (t/assert-truthy (selector/active?))
+                                              (t/assert= (length (selector/get-filtered)) 2)
+                                              (t/assert= (get (selector/get-selected) :id) "claude-opus-4-20250514")
+                                              (selector/close)))
+
+(t/test "/model selector enter switches model" (fn []
+                                                (selector/reset-state)
+                                                (api/set-provider "anthropic")
+                                                (api/set-model "claude-sonnet-4-20250514")
+                                                (fake/queue-request-response
+                                                  (json/encode @{:data @[@{:id "claude-sonnet-4-20250514"
+                                                                            :display_name "Claude Sonnet 4"
+                                                                            :type "model"}
+                                                                         @{:id "claude-opus-4-20250514"
+                                                                            :display_name "Claude Opus 4"
+                                                                            :type "model"}]
+                                                                 :has_more false}))
+                                                (commands/dispatch "/model")
+                                                (selector/select-next)
+                                                (selector/handle-key {:key :enter})
+                                                (t/assert-falsy (selector/active?))
+                                                (t/assert= (get (api/get-config) :model) "claude-sonnet-4-20250514")))
 
 (t/test "/model with no args handles API error" (fn []
+                                                 (selector/reset-state)
   # Don't queue any response — mock-request returns nil
                                                  (def result (commands/dispatch "/model"))
                                                  (t/assert-truthy (get result :handled))
-                                                 (t/assert-truthy (string/find "Failed" (get result :result)))))
+                                                 (t/assert-truthy (string/find "Failed" (get result :result)))
+                                                 (t/assert-falsy (selector/active?))))
 
 (t/test "list-models handles pagination" (fn []
   # Page 1
