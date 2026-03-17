@@ -270,6 +270,29 @@
   (when fallback-resolver
     (fallback-resolver provider)))
 
+(defn force-refresh
+  ``Force-refresh the OAuth token for a provider, ignoring expiry.
+  Returns the new API key string, or nil on failure.
+  ``
+  [provider]
+  (def cred (get auth-data provider))
+  (when (nil? cred) (break nil))
+  (def cred-type (get cred "type" (get cred :type)))
+  (when (not= cred-type "oauth") (break nil))
+  (def oauth-provider (get-oauth-provider provider))
+  (when (nil? oauth-provider) (break nil))
+  (try
+    (do
+      (def refreshed ((oauth-provider :refresh) cred))
+      (when refreshed
+        (def new-cred (merge cred refreshed))
+        (put new-cred "type" "oauth")
+        (set-credential provider new-cred)
+        ((oauth-provider :get-api-key) new-cred)))
+    ([err]
+     (eprintf "Warning: OAuth force-refresh failed for %s: %s" provider (string err))
+     nil)))
+
 (defn has-auth?
   ``Check if any form of authentication is available for a provider.
   Unlike get-api-key, this doesn't refresh OAuth tokens.

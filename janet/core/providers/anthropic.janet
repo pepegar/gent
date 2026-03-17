@@ -25,10 +25,12 @@
   (and cred (= "oauth" (get cred "type"))))
 
 (defn- wrap-system-prompt [config system-prompt]
-  "For OAuth tokens, prepend Claude Code identity to the system prompt."
+  "For OAuth tokens, prepend Claude Code identity to the system prompt.
+   Uses array-of-blocks format so the identity is a separate content block."
   (if (oauth-token? config)
     (if system-prompt
-      (string claude-code-identity "\n\n" system-prompt)
+      [{:type "text" :text claude-code-identity}
+       {:type "text" :text system-prompt}]
       claude-code-identity)
     system-prompt))
 

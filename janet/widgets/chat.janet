@@ -225,6 +225,7 @@
 (var- cached-total-vrows 0)
 (var- cached-vrows-width 0)
 (var- stream-new-vrows 0)
+(var- auth-retry-pending false)
 
 # ── State accessors (for testing and introspection) ────────────
 
@@ -1326,6 +1327,12 @@
       {:type "tool_result" :tool_use_id tool-use-id :content content-arr})
     {:type "tool_result" :tool_use_id tool-use-id :content (string result)}))
 
+(defn- auth-error? [msg]
+  "Check if an HTTP error message indicates an authentication failure."
+  (or (string/has-prefix? "status 401" msg)
+      (string/has-prefix? "status 403" msg)
+      (and (string? msg) (string/find "authentication_error" msg))))
+
 (defn- start-streaming [conversation effective-prompt]
   (hooks/run :before-send conversation)
   (stream-start-output)
@@ -1372,8 +1379,9 @@
                                                   (nil? line) (set keep-going false)
                                                   (= :done line) (do (set result :done) (set keep-going false))
                                                   (and (table? line) (= :error (get line :type)))
-                                                  (do (output-error (string "Stream error: " (get line :message "unknown")))
-                                                      (set result :error) (set keep-going false))
+                                                  (let [msg (get line :message "unknown")]
+                                                    (set result [:error msg])
+                                                    (set keep-going false))
                                                   (string? line) ((parser :feed) line)))
                                               result)))
 
@@ -1399,6 +1407,7 @@
   (hooks/run :turn-end)
   (set mode :idle)
   (set stream-ctx nil)
+  (set auth-retry-pending false)
   (widget/mark-dirty :editor))
 
 (defn- push-tool-results-and-stream []
@@ -1700,10 +1709,37 @@
     (spinner-tick)
     (def drain-result (drain-stream))
     (when (= drain-result :done) (handle-stream-done))
-    (when (= drain-result :error)
-      (stream-end-output)
-      (spinner-stop)
-      (enter-idle)))
+    (when (and (indexed? drain-result) (= :error (first drain-result)))
+      (def err-msg (get drain-result 1))
+      (if (and (auth-error? err-msg) (not auth-retry-pending))
+        (do
+          (set auth-retry-pending true)
+          (stream-end-output)
+          (spinner-start "refreshing auth token…")
+          (if (api/force-refresh-auth)
+            (do
+              (spinner-stop)
+              (output-info "Token refreshed, retrying…")
+              (def effective-prompt (build-effective-prompt))
+              (try
+                (start-streaming (conv/get-messages) effective-prompt)
+                ([err]
+                 (set auth-retry-pending false)
+                 (hooks/run :on-error err)
+                 (output-error (string err))
+                 (enter-idle))))
+            (do
+              (set auth-retry-pending false)
+              (spinner-stop)
+              (output-error (string "Stream error: " err-msg))
+              (output-error "Token refresh failed — try /login")
+              (enter-idle))))
+        (do
+          (set auth-retry-pending false)
+          (stream-end-output)
+          (spinner-stop)
+          (output-error (string "Stream error: " err-msg))
+          (enter-idle)))))
   (when (= mode :tools)
     (spinner-tick)
     (when (tool-exec :async-handle)

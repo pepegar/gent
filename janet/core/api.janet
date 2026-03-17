@@ -146,6 +146,14 @@
   (put resolved :resolved-api-key (resolve-api-key))
   resolved)
 
+(defn force-refresh-auth
+  "Force-refresh the OAuth token for the active provider.
+   Returns true if a new token was obtained, false otherwise."
+  []
+  (def p (get-active-provider))
+  (def auth-provider (or (when p (p :auth-provider)) "anthropic"))
+  (not (nil? (auth/force-refresh auth-provider))))
+
 (defn list-models
   "Fetch available models from the active provider."
   []
