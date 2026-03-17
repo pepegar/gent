@@ -58,7 +58,9 @@
    "test/test-ansi"
    "test/test-auth"
    "test/test-openai-provider"
-   "test/test-sessions-explorer"])
+   "test/test-sessions-explorer"
+   "test/test-auth-retry"
+   "test/test-token-refresh"])
 
 # Install native function mocks (http, json, term, process) so that
 # tests importing widgets/chat and other modules that use native
