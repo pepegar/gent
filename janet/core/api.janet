@@ -9,6 +9,7 @@
 #   5. Auth module fallback resolver
 #
 # Other configuration:
+#   GENT_PROVIDER   — provider id (e.g. "openai", "anthropic")
 #   GENT_API_URL    — API endpoint (default: from active provider)
 #   GENT_MODEL      — model name
 #   GENT_MAX_TOKENS — max tokens per response
@@ -17,11 +18,11 @@
 
 # ── Config ───────────────────────────────────────────────────
 
-# Mutable config — env vars override defaults, set-* overrides everything.
-# Initial defaults are Anthropic; they get overridden when set-provider is called.
+# Mutable config — env vars override defaults, set-provider fills in the rest.
+# Starts empty — no hardcoded provider. Auto-detected at the bottom of this file.
 (var- config
-  @{:url (or (os/getenv "GENT_API_URL") "https://api.anthropic.com/v1/messages")
-    :model (or (os/getenv "GENT_MODEL") "claude-sonnet-4-20250514")
+  @{:url nil
+    :model nil
     :max-tokens (let [env (os/getenv "GENT_MAX_TOKENS")]
                   (if env (scan-number env) 32000))
     :api-key nil  # nil means "resolve dynamically via auth module"
@@ -31,7 +32,7 @@
 # ── Provider registry ────────────────────────────────────────
 
 (var- providers @{})
-(var- active-provider-id "anthropic")
+(var- active-provider-id nil)
 
 (defn register-api-provider
   "Register an API provider backend. provider is a table with :id and provider functions."
@@ -294,3 +295,26 @@
     :build-body-no-stream openai/build-body-no-stream
     :new-stream-parser openai/new-stream-parser
     :list-models openai/list-models})
+
+# ── Auto-detect active provider ──────────────────────────────
+# Priority: GENT_PROVIDER env var → first provider with auth → first registered.
+# Must run after all providers are registered and auth.janet has loaded credentials.
+
+(defn- detect-provider []
+  "Auto-detect which provider to use based on env and auth state."
+  # 1. Explicit env var
+  (when-let [env-provider (os/getenv "GENT_PROVIDER")]
+    (break env-provider))
+  # 2. First provider that has authentication configured
+  (var found nil)
+  (eachp [id p] providers
+    (when (and (nil? found) (auth/has-auth? (p :auth-provider)))
+      (set found id)))
+  (when found (break found))
+  # 3. First registered provider (arbitrary but stable)
+  (when (> (length providers) 0)
+    (break (first (keys providers))))
+  nil)
+
+(when-let [provider-id (detect-provider)]
+  (set-provider provider-id))
