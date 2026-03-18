@@ -61,6 +61,9 @@ cleanup() {
   if [[ -n "$SID" ]]; then
     tui-wright kill "$SID" 2>/dev/null || true
   fi
+  if [[ -n "${FAKE_HOME:-}" ]]; then
+    rm -rf "$FAKE_HOME"
+  fi
 }
 trap cleanup EXIT
 
@@ -90,10 +93,12 @@ ensure_twins_up() {
   exit 1
 }
 
+FAKE_HOME=$(mktemp -d)
+
 spawn_gent_anthropic() {
   local sid_line
-  sid_line=$(GENT_API_URL="$TWIN_API_URL" GENT_API_KEY="$TWIN_API_KEY" \
-    tui-wright spawn "$GENT" --cols "$COLS" --rows "$ROWS")
+  sid_line=$(HOME="$FAKE_HOME" GENT_API_URL="$TWIN_API_URL" GENT_API_KEY="$TWIN_API_KEY" \
+    tui-wright spawn "$GENT" --cols "$COLS" --rows "$ROWS" -- -q)
   SID=$(echo "$sid_line" | sed 's/session: //')
   echo "Session: $SID"
 
@@ -106,8 +111,8 @@ spawn_gent_anthropic() {
 
 spawn_gent_openai() {
   local sid_line
-  sid_line=$(GENT_API_URL="$OPENAI_TWIN/v1/responses" GENT_API_KEY="$TWIN_API_KEY" \
-    tui-wright spawn "$GENT" --cols "$COLS" --rows "$ROWS")
+  sid_line=$(HOME="$FAKE_HOME" GENT_API_URL="$OPENAI_TWIN/v1/responses" GENT_API_KEY="$TWIN_API_KEY" \
+    tui-wright spawn "$GENT" --cols "$COLS" --rows "$ROWS" -- -q)
   SID=$(echo "$sid_line" | sed 's/session: //')
   echo "Session: $SID"
 

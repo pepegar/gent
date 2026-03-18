@@ -147,7 +147,7 @@
           ++ [
             parinfer-rust.packages.${system}.default
             tui-wright.packages.${system}.default
-            agg.packages.${system}.default
+            agg.defaultPackage.${system}
           ]
           ++ (with pkgs; [
             # Additional development tools

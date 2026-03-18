@@ -318,8 +318,10 @@
       :diff-green-fg (tui/style :fg [:rgb 180 255 180] :bg [:rgb 15 40 25])  # Green on darker tinted surface
       :user-row-bg     (tui/style :bg [:rgb 30 34 66])              # Blue-tinted Surface0
       :thinking-label  (tui/style :fg [:rgb 148 148 184] :italic true) # Lavender dimmed
+      :review-label    (tui/style :fg [:rgb 203 166 247] :bold true)  # Mauve
       :agent-row-bg    (tui/style :bg [:rgb 56 40 48])              # Peach-tinted Surface0
       :thinking-row-bg (tui/style :bg [:rgb 40 38 58])              # Lavender-tinted Surface0
+      :review-row-bg   (tui/style :bg [:rgb 48 32 58])              # Mauve-tinted Surface0
       :tool-row-bg     (tui/style :bg [:rgb 34 52 52])              # Green-tinted Surface0
       :tool-success-bg (tui/style :bg [:rgb 15 40 25])              # Darker green
       :tool-error-bg   (tui/style :bg [:rgb 40 20 25])              # Darker red
@@ -353,8 +355,10 @@
       :diff-green-fg (tui/style :fg [:rgb 64 160 43] :bg [:rgb 218 240 218])  # Green on green-tinted
       :user-row-bg     (tui/style :bg [:rgb 220 225 248])           # Blue-tinted Mantle
       :thinking-label  (tui/style :fg [:rgb 114 110 140] :italic true) # Lavender dimmed
+      :review-label    (tui/style :fg [:rgb 136 57 239] :bold true)  # Mauve
       :agent-row-bg    (tui/style :bg [:rgb 244 228 218])           # Peach-tinted Mantle
       :thinking-row-bg (tui/style :bg [:rgb 228 226 242])           # Lavender-tinted Mantle
+      :review-row-bg   (tui/style :bg [:rgb 236 222 244])           # Mauve-tinted Mantle
       :tool-row-bg     (tui/style :bg [:rgb 222 238 224])           # Green-tinted Mantle
       :tool-success-bg (tui/style :bg [:rgb 218 240 222])           # Deeper green
       :tool-error-bg   (tui/style :bg [:rgb 246 218 224])           # Deeper red
@@ -1094,12 +1098,20 @@
 
 # ── Streaming output ──────────────────────────────────────────
 
-(var- stream-state @{:active false :line-buf @"" :first true :parser nil})
+(var- stream-state @{:active false :line-buf @"" :first true :parser nil
+                     :label "   gent: " :label-style nil
+                     :review false :review-buf @"" :review-provider ""})
 
-(defn- stream-start-output []
+(defn- stream-start-output [&opt label label-style row-bg]
+  (default label "   gent: ")
+  (default label-style (colors :agent-label))
+  (default row-bg :agent-row-bg)
+  (def pad (string/repeat " " (length label)))
   (when (> (length scrollback) 0) (push-line ""))
   (put stream-state :active true)
   (put stream-state :first true)
+  (put stream-state :label label)
+  (put stream-state :label-style label-style)
   (buffer/clear (stream-state :line-buf))
   (def max-w (get-chat-content-width))
   (def parser
@@ -1108,10 +1120,10 @@
         (def prefixed
           (if (stream-state :first)
             (do (put stream-state :first false)
-                (array/concat @[@{:text "   gent: " :style (colors :agent-label)}] spans))
-            (array/concat @[@{:text "         " :style (tui/style)}] spans)))
+                (array/concat @[@{:text label :style label-style}] spans))
+            (array/concat @[@{:text pad :style (tui/style)}] spans)))
         (push-raw-line prefixed)
-        (put (last scrollback) :row-style :agent-row-bg))
+        (put (last scrollback) :row-style row-bg))
       max-w))
   (put stream-state :parser parser))
 
@@ -1371,13 +1383,45 @@
                          (put spinner-state :message (string "streaming " name " arguments… (" size-str ")")))
          :on-error (fn [err]
                     (spinner-stop)
-                    (output-error (string "Stream error: " err))
+                    (output-error (string (api/get-active-provider-id) " API error: " err))
                     (hooks/run :on-error err))}
         effective-prompt)
       ([err]
        (cleanup-failed-stream-start)
        (error err))))
   (set stream-ctx ctx)
+  (put stream-state :review false)
+  (set mode :streaming))
+
+(defn start-review-streaming
+  "Start streaming a cross-review from another provider.
+   Uses the same streaming infrastructure but with review label/colors.
+   On completion, injects the review into the conversation as context."
+  [provider-id provider-name conversation system-prompt]
+  (def label (string "   " provider-name ": "))
+  (buffer/clear (stream-state :review-buf))
+  (put stream-state :review-provider provider-name)
+  (stream-start-output label (colors :review-label) :review-row-bg)
+  (spinner-start (string "reviewing (" provider-name ")…"))
+  (def ctx
+    (try
+      (api/stream-start-with-provider
+        provider-id
+        conversation
+        @[]
+        @{:on-text (fn [text]
+                     (when (spinner-active?) (spinner-stop))
+                     (buffer/push-string (stream-state :review-buf) text)
+                     (stream-delta text))
+          :on-error (fn [err]
+                      (spinner-stop)
+                      (output-error (string "Review error: " err)))}
+        system-prompt)
+      ([err]
+       (cleanup-failed-stream-start)
+       (error err))))
+  (set stream-ctx ctx)
+  (put stream-state :review true)
   (set mode :streaming))
 
 (defn- drain-stream []
@@ -1525,12 +1569,24 @@
                 ((inner-handle :cancel))))))))))
 
 (defn- handle-stream-done []
-  (profile/end stream-span-id)
-  (set stream-span-id nil)
+  (when stream-span-id
+    (profile/end stream-span-id)
+    (set stream-span-id nil))
   (stream-end-output)
   (spinner-stop)
+  (def is-review (stream-state :review))
+  (put stream-state :review false)
   (def parser (stream-ctx :parser))
   (def response ((parser :finish)))
+  (when is-review
+    (def review-text (string (stream-state :review-buf)))
+    (def review-provider (stream-state :review-provider))
+    (buffer/clear (stream-state :review-buf))
+    (when (not= "" review-text)
+      (conv/push {:role "user"
+                  :content (string "[cross-review from " review-provider "]\n" review-text)}))
+    (enter-idle)
+    (break))
   (when (nil? response)
     (output-error "API request failed — nil response")
     (enter-idle)
@@ -1746,14 +1802,14 @@
             (do
               (set auth-retry-pending false)
               (spinner-stop)
-              (output-error (string "Stream error: " err-msg))
+              (output-error (string (api/get-active-provider-id) " API error: " err-msg))
               (output-error "Token refresh failed — try /login")
               (enter-idle))))
         (do
           (set auth-retry-pending false)
           (stream-end-output)
           (spinner-stop)
-          (output-error (string "Stream error: " err-msg))
+          (output-error (string (api/get-active-provider-id) " API error: " err-msg))
           (enter-idle)))))
   (when (= mode :tools)
     (spinner-tick)
@@ -1887,25 +1943,25 @@
           (= rs :user-row-bg) (colors :user-label)
           (= rs :agent-row-bg) (colors :agent-label)
           (= rs :thinking-row-bg) (colors :thinking-label)
+          (= rs :review-row-bg) (colors :review-label)
           (colors :tool-label)))
       (tui/buffer-set-char buf (rect :x) y "▐" gutter-color)))
 
   # Render the in-progress streaming line (partial line not yet newline-terminated)
   (when has-partial
     (def partial-text (string (stream-state :line-buf)))
-    # Render just below the scrollback content (in the reserved area)
     (def partial-y (+ (rect :y) y-offset visible-count))
     (when (< partial-y (+ (rect :y) height))
-      (tui/buffer-set-char buf (rect :x) partial-y "▐" (colors :agent-label))
+      (def slabel (or (stream-state :label) "   gent: "))
+      (def slabel-style (or (stream-state :label-style) (colors :agent-label)))
+      (def spad (string/repeat " " (length slabel)))
+      (tui/buffer-set-char buf (rect :x) partial-y "▐" slabel-style)
       (if (stream-state :first)
         (do
-          (def label-style (colors :agent-label))
-          (def text-style (tui/style))
-          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y "   gent: " label-style)
-          (tui/buffer-set-string buf (+ (rect :x) 10) partial-y partial-text text-style))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y slabel slabel-style)
+          (tui/buffer-set-string buf (+ (rect :x) 1 (length slabel)) partial-y partial-text (tui/style)))
         (do
-          (def style (tui/style))
-          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string "         " partial-text) style)))))
+          (tui/buffer-set-string buf (+ (rect :x) 1) partial-y (string spad partial-text) (tui/style))))))
 
   # Render spinner (3-row gentleman) at bottom when active and scrolled to bottom
   (when (and (spinner-active?) (= scroll-offset 0))

@@ -217,7 +217,7 @@
     (sc/tick-until-idle)
     (sc/assert-mode :idle)
 
-    (sc/assert-visible "Stream error: status 500")
+    (sc/assert-visible "API error: status 500")
     (sc/assert-not-visible "Token refreshed")
     (sc/assert-not-visible "Token refresh failed")))
 
@@ -236,7 +236,7 @@
     (sc/tick-until-idle)
     (sc/assert-mode :idle)
 
-    (sc/assert-visible "Stream error: status 429")
+    (sc/assert-visible "API error: status 429")
     (sc/assert-not-visible "Token refreshed")))
 
 # ── Test: auth retry only fires once (no infinite loop) ───────
@@ -262,7 +262,7 @@
     # First 401 triggers retry
     (sc/assert-visible "Token refreshed, retrying")
     # Second 401 treated as normal error (auth-retry-pending is true)
-    (sc/assert-visible "Stream error: status 401")))
+    (sc/assert-visible "API error: status 401")))
 
 # ── Test: auth retry resets between turns ─────────────────────
 

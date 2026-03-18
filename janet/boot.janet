@@ -33,6 +33,7 @@
 (import commands/profile)
 (import commands/model)
 (import commands/provider)
+(import commands/crossreview)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)

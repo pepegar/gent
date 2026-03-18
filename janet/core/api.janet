@@ -34,6 +34,7 @@
 (var- providers @{})
 (var- active-provider-id nil)
 (var- provider-models @{})
+(var- provider-urls @{})
 (var- pending-env-model (os/getenv "GENT_MODEL"))
 
 (def- openai-api-url "https://api.openai.com/v1/responses")
@@ -89,7 +90,9 @@
   (def p (get providers id))
   (unless p (error (string "Unknown API provider: " id)))
   (set active-provider-id id)
-  (put config :url (resolve-provider-default-url id p))
+  (def url (resolve-provider-default-url id p))
+  (put config :url url)
+  (put provider-urls id url)
   (def model
     (cond
       (get provider-models id) (get provider-models id)
@@ -121,6 +124,10 @@
 # ── Config setters ───────────────────────────────────────────
 
 (defn set-url [url] (put config :url url))
+(defn set-provider-url
+  "Set the URL for a specific provider by ID (used by chat-with-provider)."
+  [id url]
+  (put provider-urls id url))
 (defn set-model [m]
   (put config :model m)
   (when active-provider-id
@@ -280,6 +287,32 @@
     (error "API request failed — got nil response"))
   (json/decode response))
 
+(defn stream-start-with-provider
+  "Start a non-blocking streaming request to a specific provider by ID.
+   Does not mutate global state — builds a one-off config for the target provider.
+   Returns {:parser :stream-id} like stream-start."
+  [provider-id conversation tools callbacks &opt system-prompt]
+  (def p (get providers provider-id))
+  (unless p (error (string "Unknown provider: " provider-id)))
+  (def auth-provider (p :auth-provider))
+  (def api-key (auth/get-api-key auth-provider))
+  (unless api-key
+    (error (string "No API key for provider '" auth-provider "'. Run /login " auth-provider)))
+  (def url (or (get provider-urls provider-id) (p :default-url)))
+  (def resolved
+    @{:url url
+      :model (or (get provider-models provider-id) (p :default-model))
+      :max-tokens (or (p :default-max-tokens) 32000)
+      :resolved-api-key api-key
+      :thinking-enabled false
+      :thinking-budget 0})
+  (def headers ((p :build-headers) resolved))
+  (def converted-tools (if (p :convert-tools) ((p :convert-tools) tools) tools))
+  (def body ((p :build-body) resolved conversation converted-tools system-prompt))
+  (def parser ((p :new-stream-parser) callbacks))
+  (def stream-id (http/stream-start "POST" url headers body))
+  @{:parser parser :stream-id stream-id})
+
 (defn chat-stream
   ``Send a conversation with SSE streaming (blocking).
 
@@ -325,7 +358,7 @@
     :name "Anthropic"
     :auth-provider "anthropic"
     :default-url "https://api.anthropic.com/v1/messages"
-    :default-model "claude-sonnet-4-20250514"
+    :default-model "claude-opus-4-6"
     :default-max-tokens 32000
     :build-headers anthropic/build-headers
     :convert-tools anthropic/convert-tools
@@ -343,7 +376,7 @@
     :name "OpenAI (Codex)"
     :auth-provider "openai"
     :default-url "https://chatgpt.com/backend-api/codex/responses"
-    :default-model "gpt-5.1"
+    :default-model "gpt-5.4"
     :default-max-tokens 16384
     :build-headers openai/build-headers
     :convert-tools openai/convert-tools
