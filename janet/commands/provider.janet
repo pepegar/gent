@@ -3,6 +3,7 @@
 (import core/commands :as commands)
 (import core/api :as api)
 (import core/selector :as selector)
+(import widgets/chat :as chat)
 
 (defn- switch-provider [name]
   (api/set-provider name)
@@ -26,7 +27,9 @@
               :current (= id current-provider)})
           (api/list-providers))
      :empty-text "No providers available."
-     :on-submit (fn [item] (switch-provider (item :id)))})
+     :on-submit
+     (fn [item]
+       (chat/output (switch-provider (item :id))))})
   "")
 
 (commands/register "provider"

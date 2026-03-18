@@ -2,7 +2,8 @@
 
 (import core/commands :as commands)
 (import core/auth :as auth)
-(import core/registers :as reg)
+(import core/api :as api)
+(import core/selector :as selector)
 (import widgets/editor :as editor-prompt)
 (import widgets/chat :as chat)
 
@@ -151,6 +152,62 @@
           "After authorizing, paste the code below and press Enter.\n"
           "(Press Escape to cancel)"))
 
+(defn- list-oauth-providers []
+  (sort-by |($ :id) (auth/get-oauth-providers)))
+
+(defn- list-oauth-provider-ids []
+  (map |($ :id) (list-oauth-providers)))
+
+(defn- start-login-flow [provider-id provider]
+  (try
+    (do
+      (def pkce (auth/generate-pkce))
+
+      (case provider-id
+        "openai"
+        (do
+          (def state (auth/openai-generate-state))
+          (def auth-url (auth/openai-auth-url pkce state))
+          (login-with-callback-server provider-id provider pkce state auth-url))
+
+        # Default: Anthropic-style manual paste flow
+        (do
+          (def auth-url (auth/anthropic-auth-url pkce))
+          (login-with-manual-paste provider-id provider pkce auth-url))))
+    ([err]
+     (string "✗ Login setup failed: " (string err)))))
+
+(defn- open-login-selector []
+  (def providers (list-oauth-providers))
+  (if (empty? providers)
+    "No OAuth providers registered."
+    (do
+      (def current-provider (api/get-active-provider-id))
+      (selector/open
+        {:title "Login"
+         :items
+         (map (fn [provider]
+                (def id (provider :id))
+                (def status
+                  (if (auth/has-credential? id)
+                    " · logged in"
+                    ""))
+                @{:id id
+                  :label id
+                  :detail (string (provider :name) status)
+                  :search-text (string id " " (provider :name))
+                  :current (= id current-provider)})
+              providers)
+         :empty-text "No OAuth providers available."
+         :on-submit
+         (fn [item]
+           (def provider-id (item :id))
+           (def result
+             (start-login-flow provider-id (auth/get-oauth-provider provider-id)))
+           (when (and result (not= "" result))
+             (chat/output result)))})
+      "")))
+
 (commands/register "login"
   {:description "Login to an OAuth provider (e.g., /login anthropic)"
    :usage "/login [provider]"
@@ -159,50 +216,20 @@
      (def parts (string/split " " (string/trim args) 2))
      (def provider-id (get parts 0 ""))
 
-     # If no provider specified, list available ones
+     # If no provider specified, open the provider selector
      (when (= "" provider-id)
-       (def providers (auth/get-oauth-providers))
-       (if (empty? providers)
-         (break "No OAuth providers registered.")
-         (break
-           (string "Available OAuth providers:\n"
-                   (string/join
-                     (seq [p :in providers]
-                       (def status
-                         (if (auth/has-credential? (p :id))
-                           " ✓ logged in"
-                           ""))
-                       (string "  • " (p :id) " — " (p :name) status))
-                     "\n")
-                   "\n\nUsage: /login <provider>"))))
+       (break (open-login-selector)))
 
      # Check if provider exists as OAuth
      (def provider (auth/get-oauth-provider provider-id))
      (unless provider
        # Maybe they want to set an API key directly?
        (break (string "Unknown OAuth provider: " provider-id
-                      "\nAvailable: " (string/join (map |($ :id) (auth/get-oauth-providers)) ", ")
+                      "\nAvailable: " (string/join (list-oauth-provider-ids) ", ")
                       "\n\nTo set an API key directly:\n"
                       "  /auth-key <provider> <key>")))
 
-     # Start the OAuth flow
-     (try
-       (do
-         (def pkce (auth/generate-pkce))
-
-         (case provider-id
-           "openai"
-           (do
-             (def state (auth/openai-generate-state))
-             (def auth-url (auth/openai-auth-url pkce state))
-             (login-with-callback-server provider-id provider pkce state auth-url))
-
-           # Default: Anthropic-style manual paste flow
-           (do
-             (def auth-url (auth/anthropic-auth-url pkce))
-             (login-with-manual-paste provider-id provider pkce auth-url))))
-       ([err]
-        (string "✗ Login setup failed: " (string err)))))})
+     (start-login-flow provider-id provider))})
 
 # ── /logout ────────────────────────────────────────────────────
 

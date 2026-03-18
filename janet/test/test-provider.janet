@@ -2,6 +2,7 @@
 (import core/api :as api)
 (import core/commands :as commands)
 (import core/selector :as selector)
+(import widgets/chat :as chat)
 (import test/helper :as t)
 
 # Import the command registration
@@ -30,12 +31,16 @@
 
 (t/test "/provider selector enter switches provider" (fn []
                                                        (selector/reset-state)
+                                                       (chat/reset-state)
                                                        (api/set-provider "anthropic")
                                                        (commands/dispatch "/provider")
                                                        (selector/select-next)
                                                        (selector/handle-key {:key :enter})
                                                        (t/assert-falsy (selector/active?))
                                                        (t/assert= (api/get-active-provider-id) "openai")
+                                                       (t/assert-truthy
+                                                         (find |(string/find "Switched to provider: openai" (get $ :text ""))
+                                                               (chat/get-scrollback)))
                                                        (api/set-provider "anthropic")))
 
 (t/test "/provider invalid arg lists available providers" (fn []

@@ -151,6 +151,23 @@
       (def marker (if (= (s :id) current-sid) " *" ""))
       (string prefix indicator date-str "  " msgs marker))))
 
+(defn- entry-search-text
+  "Return expanded search text for an explorer entry.
+   Includes the visible row text plus raw session IDs for exact lookup."
+  [entry]
+  (def entry-type (get entry :type :session))
+  (if (= entry-type :message)
+    (string (format-row entry "")
+            " "
+            (get entry :session-id "")
+            " "
+            (get entry :msg-index 0))
+    (do
+      (def s (entry :session))
+      (string (format-row entry "")
+              " "
+              (s :id)))))
+
 (defn- apply-query-filter
   "Filter flat-list by query string using fuzzy matching."
   [items q]
@@ -160,7 +177,7 @@
       (var matches @[])
       (for i 0 (length items)
         (def item (get items i))
-        (def s (fuzzy/score (format-row item "") q))
+        (def s (fuzzy/score (entry-search-text item) q))
         (when s
           (array/push matches {:index i :score s})))
       (set matches (sort-by |(get-in $ [:score :score] math/inf) matches))

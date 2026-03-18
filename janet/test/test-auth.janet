@@ -4,8 +4,25 @@
 (import test/fake-http :as fake)
 
 (import core/auth :as auth)
+(import core/api :as api)
+(import core/commands :as commands)
+(import core/selector :as selector)
+(import core/widget :as widget)
+(import widgets/chat :as chat)
+(import widgets/editor :as editor)
+(import commands/auth)
 
 (print "── test-auth ──")
+
+(defn- setup-auth-command-ui []
+  (chat/reset-state)
+  (selector/reset-state)
+  (editor/cancel-prompt)
+  (each name (widget/list-widgets)
+    (widget/unregister name))
+  (widget/register (chat/create))
+  (widget/register (editor/create))
+  (api/set-provider "anthropic"))
 
 # ── URL encoding ─────────────────────────────────────────────────
 
@@ -171,6 +188,32 @@
     (t/assert-truthy provider)
     (t/assert= "openai" (provider :id))
     (t/assert= "OpenAI (ChatGPT Plus/Pro)" (provider :name))))
+
+(t/test "/login with no args opens selector"
+  (fn []
+    (setup-auth-command-ui)
+    (def result (commands/dispatch "/login"))
+    (def items (selector/get-filtered))
+    (def anthropic-item (find |(= ($ :id) "anthropic") items))
+    (t/assert-truthy (get result :handled))
+    (t/assert= (get result :result) "")
+    (t/assert-truthy (selector/active?))
+    (t/assert= (length items) 2)
+    (t/assert= (get (selector/get-selected) :id) "anthropic")
+    (t/assert-truthy (get anthropic-item :current false))
+    (selector/close)))
+
+(t/test "/login selector enter starts selected provider flow"
+  (fn []
+    (setup-auth-command-ui)
+    (commands/dispatch "/login")
+    (selector/handle-key {:key :enter})
+    (t/assert-falsy (selector/active?))
+    (t/assert-truthy (editor/prompt-active?))
+    (t/assert-truthy
+      (find |(string/find "Opening browser for Anthropic" (get $ :text ""))
+            (chat/get-scrollback)))
+    (editor/cancel-prompt)))
 
 (t/test "get-api-key extracts access token from openai credentials"
   (fn []

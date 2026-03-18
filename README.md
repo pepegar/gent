@@ -210,7 +210,6 @@ Conversations are persisted as append-only logs at:
 Each message is a structured s-expression, one per line. The format is crash-safe, human-readable, and easy to inspect.
 
 - `/sessions` — List sessions
-- `/resume <id>` — Resume a session
 - `/fork` / `/unfork` — Branch and return
 - `/rollback <n>` — Remove the last `n` messages
 

@@ -251,6 +251,20 @@
                                       (explorer/close)
                                       (cleanup-test-sessions)))
 
+(t/test "search matches raw session id" (fn []
+                                         (setup-test-sessions)
+                                         (explorer/reset-state)
+                                         (explorer/open)
+                                         (def q "test-child-001")
+                                         (for i 0 (length q)
+                                           (explorer/search-insert (string/slice q i (+ i 1))))
+                                         (def entry (explorer/get-selected))
+                                         (t/assert= (explorer/get-query) "test-child-001")
+                                         (t/assert= (get entry :type) :session)
+                                         (t/assert= (get-in entry [:session :id]) "test-child-001")
+                                         (explorer/close)
+                                         (cleanup-test-sessions)))
+
 # ── Expand/Collapse ────────────────────────────────────────
 
 (t/test "tab expands session to show messages" (fn []

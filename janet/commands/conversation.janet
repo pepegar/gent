@@ -1,5 +1,5 @@
 # Built-in slash commands for conversation management.
-# Imported at boot to register /sessions, /resume, /fork, etc.
+# Imported at boot to register /sessions, /fork, etc.
 
 (import core/commands :as commands)
 (import core/conversation :as conv)
@@ -30,16 +30,6 @@
    :function (fn [args]
               (sessions-explorer/open)
               "")})
-
-(commands/register "resume"
-  {:description "Resume a previous session"
-   :usage "/resume <session-id>"
-   :function (fn [args]
-              (def sid (string/trim args))
-              (when (= "" sid)
-                (break "Usage: /resume <session-id>"))
-              (conv/resume sid)
-              (string "Resumed session " sid " (" (conv/length) " messages)"))})
 
 (commands/register "fork"
   {:description "Fork the conversation into a new session"

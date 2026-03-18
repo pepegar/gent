@@ -1,6 +1,7 @@
 (import core/commands :as commands)
 (import core/api :as api)
 (import core/selector :as selector)
+(import widgets/chat :as chat)
 
 (defn- infer-provider
   "Infer the provider ID from a model name. Returns nil if unknown."
@@ -55,7 +56,9 @@
                   :current (= id current-model)})
               sorted)
          :empty-text "No models found."
-         :on-submit (fn [item] (switch-model (item :id)))})
+         :on-submit
+         (fn [item]
+           (chat/output (switch-model (item :id))))})
       "")))
 
 (commands/register "model"

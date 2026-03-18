@@ -2,6 +2,7 @@
 (import core/api :as api)
 (import core/commands :as commands)
 (import core/selector :as selector)
+(import widgets/chat :as chat)
 (import test/helper :as t)
 (import test/fake-http :as fake)
 
@@ -51,6 +52,7 @@
 
 (t/test "/model selector enter switches model" (fn []
                                                 (selector/reset-state)
+                                                (chat/reset-state)
                                                 (api/set-provider "anthropic")
                                                 (api/set-model "claude-sonnet-4-20250514")
                                                 (fake/queue-request-response
@@ -65,7 +67,10 @@
                                                 (selector/select-next)
                                                 (selector/handle-key {:key :enter})
                                                 (t/assert-falsy (selector/active?))
-                                                (t/assert= (get (api/get-config) :model) "claude-sonnet-4-20250514")))
+                                                (t/assert= (get (api/get-config) :model) "claude-sonnet-4-20250514")
+                                                (t/assert-truthy
+                                                  (find |(string/find "Switched to model: claude-sonnet-4-20250514" (get $ :text ""))
+                                                        (chat/get-scrollback)))))
 
 (t/test "/model with no args handles API error" (fn []
                                                  (selector/reset-state)
