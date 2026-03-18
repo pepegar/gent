@@ -165,42 +165,60 @@
         '';
       };
 
-      checks.parinfer = let
-        parinfer = parinfer-rust.packages.${system}.default;
-        checkScript = pkgs.writeShellScript "parinfer-check.sh" ''
-          set -uo pipefail
-          failed=0
-          skipped=0
-          src="$1"
-          out="$2"
-          for f in $(find "$src/janet" -name '*.janet'); do
-            name="''${f#$src/}"
-            tmpfile=$(mktemp)
-            if ! ${parinfer}/bin/parinfer-rust --mode paren --language janet --no-janet-long-strings < "$f" > "$tmpfile" 2>/dev/null; then
-              echo "SKIP: $name (parinfer-rust cannot process this file)"
-              skipped=$((skipped + 1))
+      checks = {
+        # Verify the project compiles (reuses the package derivation)
+        build = self.packages.${system}.gent;
+
+        # Run the Janet test suite
+        janet-tests = pkgs.runCommand "janet-tests" {
+          nativeBuildInputs = [pkgs.janet];
+          src = self;
+        } ''
+          cp -r $src/janet janet
+          chmod -R u+w janet
+          cd janet/..
+          HOME=$(mktemp -d) janet janet/test/run.janet
+          touch $out
+        '';
+
+        # Parinfer formatting check
+        parinfer = let
+          parinfer = parinfer-rust.packages.${system}.default;
+          checkScript = pkgs.writeShellScript "parinfer-check.sh" ''
+            set -uo pipefail
+            failed=0
+            skipped=0
+            src="$1"
+            out="$2"
+            for f in $(find "$src/janet" -name '*.janet'); do
+              name="''${f#$src/}"
+              tmpfile=$(mktemp)
+              if ! ${parinfer}/bin/parinfer-rust --mode paren --language janet --no-janet-long-strings < "$f" > "$tmpfile" 2>/dev/null; then
+                echo "SKIP: $name (parinfer-rust cannot process this file)"
+                skipped=$((skipped + 1))
+                rm -f "$tmpfile"
+                continue
+              fi
+              if ! diff -u "$f" "$tmpfile" > /dev/null 2>&1; then
+                echo "FAIL: $name needs parinfer formatting"
+                diff -u "$f" "$tmpfile" || true
+                failed=1
+              fi
               rm -f "$tmpfile"
-              continue
+            done
+            if [ "$failed" = "1" ]; then
+              echo ""
+              echo "Run 'parinfer-rust -m paren -l janet < file.janet' to fix"
+              exit 1
             fi
-            if ! diff -u "$f" "$tmpfile" > /dev/null 2>&1; then
-              echo "FAIL: $name needs parinfer formatting"
-              diff -u "$f" "$tmpfile" || true
-              failed=1
-            fi
-            rm -f "$tmpfile"
-          done
-          if [ "$failed" = "1" ]; then
-            echo ""
-            echo "Run 'parinfer-rust -m paren -l janet < file.janet' to fix"
-            exit 1
-          fi
-          echo "All processable .janet files pass parinfer check (skipped $skipped)"
-          touch "$out"
-        '';
-      in
-        pkgs.runCommand "parinfer-check" {nativeBuildInputs = [parinfer pkgs.diffutils];} ''
-          ${checkScript} ${self} $out
-        '';
+            echo "All processable .janet files pass parinfer check (skipped $skipped)"
+            touch "$out"
+          '';
+        in
+          pkgs.runCommand "parinfer-check" {nativeBuildInputs = [parinfer pkgs.diffutils];} ''
+            ${checkScript} ${self} $out
+          '';
+      };
 
       # For `nix run`
       apps = {
