@@ -27,28 +27,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: rust-${{ runner.os }}-native
+      - name: Setup Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Install Janet
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            git clone --depth 1 --branch v1.37.1 https://github.com/janet-lang/janet.git /tmp/janet
-            cd /tmp/janet && make -j$(nproc) && sudo make install
-          elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install janet
-          fi
-
-      - name: Run tests
-        run: |
-          cargo build
-          janet janet/test/run.janet
+      - name: Run all checks (build, cargo test, janet tests, parinfer)
+        run: nix flake check -L
 
   build:
     name: Build ${{ matrix.target }}
