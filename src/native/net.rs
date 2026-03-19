@@ -56,10 +56,7 @@ fn listen(args: &mut [Janet]) -> Janet {
             }
             Janet::number(id as f64)
         }
-        Err(e) => {
-            eprintln!("net/listen: failed to bind on {}: {}", addr, e);
-            Janet::nil()
-        }
+        Err(_) => Janet::nil(),
     }
 }
 
@@ -119,7 +116,9 @@ fn accept(args: &mut [Janet]) -> Janet {
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // No connection yet
                 }
-                Err(_) => return Janet::nil(),
+                Err(_) => {
+                    return Janet::nil();
+                }
             }
         }
 
@@ -339,10 +338,7 @@ fn connect(args: &mut [Janet]) -> Janet {
             }
             Janet::number(conn_id as f64)
         }
-        Err(e) => {
-            eprintln!("net/connect: failed to connect to {}: {}", addr, e);
-            Janet::nil()
-        }
+        Err(_) => Janet::nil(),
     }
 }
 

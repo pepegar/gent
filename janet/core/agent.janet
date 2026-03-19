@@ -28,6 +28,7 @@
 (import core/dialog :as dialog)
 (import core/profile :as profile)
 (import core/rpc-server :as rpc-srv)
+(import core/observability :as obs)
 (import core/selector :as selector)
 (import core/sessions-explorer :as sessions-explorer)
 
@@ -468,7 +469,11 @@
 
     # Initialize conversation
     (def sid (conv/init))
+    (obs/init sid)
     (chat/output-info (string "  session: " sid))
+    (when (obs/get-http-port)
+      (chat/output-info (string "  control plane: http://localhost:"
+                                (obs/get-http-port) "/metrics")))
     (chat/output "")
 
     # Load cross-session input history
@@ -500,6 +505,7 @@
                                                        (chat/active?) 16
                                                        (and rpc-server (rpc-srv/has-clients? rpc-server)) 50
                                                        rpc-server 100
+                                                       (obs/get-http-port) 100
                                                        nil))
 
       # 2. Poll terminal event
@@ -703,6 +709,9 @@
                                                        (set should-quit true)
                                                        (break)))
 
+      # 4b. Poll observability HTTP server
+                                                   (obs/poll-http)
+
       # 5. Update all widgets (chat drains stream, polls tools)
                                                    (profile/with-span "widget:update-all" "update" (fn [] (widget/update-all)))
 
@@ -722,10 +731,11 @@
                                                      (widget/mark-all-dirty))
 
       # 8. Render frame (diff-based)
-                                                   (profile/with-span "render:frame" "render" (fn [] (render-frame)))))
+                                                   (profile/with-span "render:frame" "render" (fn [] (render-frame))))))
 
     # Cleanup RPC server if started
      (when rpc-server
-       (rpc-srv/stop rpc-server)))))
+       (rpc-srv/stop rpc-server))
+     (obs/stop)))
 
     # close defer, defn

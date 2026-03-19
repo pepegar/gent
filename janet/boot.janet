@@ -16,6 +16,7 @@
 (import core/commands :as commands)
 (import core/registers :as reg)
 (import core/profile :as profile)
+(import core/observability :as obs)
 
 # Built-in tools
 (import tools/read-file)
@@ -34,6 +35,7 @@
 (import commands/model)
 (import commands/provider)
 (import commands/crossreview)
+(import commands/usage)
 
 # Discover skills from .gent/skills/ and .agents/skills/
 (skills/init-paths)

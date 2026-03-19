@@ -42,6 +42,7 @@
    "test/test-inspect"
    "test/test-snapshot"
    "test/test-profile"
+   "test/test-observability"
    "test/test-stage"
    "test/test-scenario"
    "test/test-thinking"
