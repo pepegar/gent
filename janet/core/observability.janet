@@ -248,21 +248,20 @@
 # ── HTTP control plane ────────────────────────────────────────
 
 (defn start-http-server
-  "Start the metrics HTTP server on port. Silently skips if port is in use."
+  "Start the metrics HTTP server. Tries port, then port+1 … port+9."
   [port]
-  (try
-    (do
-      (def listener (net/listen port))
-      (if listener
+  (var p port)
+  (while (< p (+ port 10))
+    (def ok
+      (try
         (do
-          (set http-listener listener)
-          (set http-port port))
-        (do
-          (set http-listener nil)
-          (set http-port nil))))
-    ([_]
-     (set http-listener nil)
-     (set http-port nil))))
+          (def listener (net/listen p))
+          (if listener
+            (do (set http-listener listener) (set http-port p) true)
+            false))
+        ([_] false)))
+    (when ok (break))
+    (++ p)))
 
 (defn get-http-port [] http-port)
 
