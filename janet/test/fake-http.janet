@@ -312,6 +312,41 @@
   (put net-listeners listener-id nil)
   nil)
 
+# ── Crypto mocks ───────────────────────────────────────────────
+
+(var- crypto-random-handler nil)
+
+(defn set-crypto-random-handler
+  "Set a custom handler for crypto/random-bytes calls.
+   (fn [n] => buffer) — useful for deterministic tests."
+  [f]
+  (set crypto-random-handler f))
+
+(defn- mock-crypto-random-bytes [n]
+  (if crypto-random-handler
+    (crypto-random-handler n)
+    (do
+      (def buf (buffer/new n))
+      (def rng (math/rng (mod (math/floor (* (os/clock) 1000000)) 0x7FFFFFFF)))
+      (for i 0 n
+        (buffer/push-byte buf (mod (math/rng-int rng) 256)))
+      buf)))
+
+(defn- mock-crypto-sha256 [data]
+  "Mock SHA-256: returns a deterministic 32-byte hash.
+   Not cryptographically correct — just consistent for testing."
+  (def msg (if (buffer? data) (string data) data))
+  (def buf (buffer/new 32))
+  # Simple deterministic hash: cycle through message bytes with mixing
+  (var h 0x67452301)
+  (each b msg
+    (set h (mod (+ (* h 31) b) 0x7FFFFFFF)))
+  # Fill 32 bytes from the hash state
+  (for i 0 32
+    (set h (mod (+ (* h 31) i) 0x7FFFFFFF))
+    (buffer/push-byte buf (mod h 256)))
+  buf)
+
 # ── Install ────────────────────────────────────────────────────
 
 (defn install
@@ -342,4 +377,6 @@
   (install-mock env "net/read-raw" mock-net-read-raw)
   (install-mock env "net/close" mock-net-close)
   (install-mock env "net/close-listener" mock-net-close-listener)
+  (install-mock env "crypto/sha256" mock-crypto-sha256)
+  (install-mock env "crypto/random-bytes" mock-crypto-random-bytes)
   nil)

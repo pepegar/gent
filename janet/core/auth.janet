@@ -40,6 +40,28 @@
       (buffer/push buf (string/format "%%%02X" byte))))
   (string buf))
 
+# ── Base64url encoding helper ─────────────────────────────────────────
+(def- b64-chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+(defn- base64url-encode
+  "Base64url-encode a buffer/string (no padding)."
+  [data]
+  (def buf @"")
+  (def len (length data))
+  (var i 0)
+  (while (< i len)
+    (def b0 (get data i))
+    (def b1 (if (< (+ i 1) len) (get data (+ i 1)) 0))
+    (def b2 (if (< (+ i 2) len) (get data (+ i 2)) 0))
+    (buffer/push-byte buf (get b64-chars (brshift b0 2)))
+    (buffer/push-byte buf (get b64-chars (bor (blshift (band b0 0x03) 4) (brshift b1 4))))
+    (when (< (+ i 1) len)
+      (buffer/push-byte buf (get b64-chars (bor (blshift (band b1 0x0F) 2) (brshift b2 6)))))
+    (when (< (+ i 2) len)
+      (buffer/push-byte buf (get b64-chars (band b2 0x3F))))
+    (set i (+ i 3)))
+  (string buf))
+
 # ── OAuth provider registry ───────────────────────────────────────────
 # Each provider is a table with:
 #   :id         — string identifier (e.g. "anthropic")
@@ -92,8 +114,8 @@
       (eachp [k v] val
         (def str-key (if (keyword? k) (string k) k))
         (put result str-key (stringify-keys v)))
-	      result)
-	    val))
+      result)
+    val))
 
 (defn- object->table
   "Copy a table or struct into a fresh table."
@@ -345,28 +367,17 @@
 # Uses the same client ID as pi-mono / Claude Code.
 
 (defn generate-pkce
-  "Generate PKCE code verifier and challenge using openssl. Returns {:verifier :challenge}."
+  "Generate PKCE code verifier and challenge. Returns {:verifier :challenge}."
   []
-  # Generate 32 random bytes, base64url-encode as verifier
-  (def verifier-result
-    (process/exec "sh" ["-c" "openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n'"]))
-  (when (not= 0 (verifier-result :status))
-    (error "Failed to generate PKCE verifier"))
-  (def verifier (string/trim (verifier-result :stdout)))
-
-  # SHA-256 hash of verifier, base64url-encoded as challenge
-  (def challenge-result
-    (process/exec "sh" ["-c"
-                        (string "printf '%s' '" verifier "' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=\\n'")]))
-  (when (not= 0 (challenge-result :status))
-    (error "Failed to generate PKCE challenge"))
-  (def challenge (string/trim (challenge-result :stdout)))
-
+  (def verifier (base64url-encode (crypto/random-bytes 32)))
+  (def challenge (base64url-encode (crypto/sha256 verifier)))
   {:verifier verifier :challenge challenge})
 
 (def- anthropic-client-id "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
 (def- anthropic-authorize-url "https://claude.ai/oauth/authorize")
-(def- anthropic-token-url "https://console.anthropic.com/v1/oauth/token")
+(def- anthropic-token-url
+  (or (os/getenv "GENT_OAUTH_TOKEN_URL")
+      "https://console.anthropic.com/v1/oauth/token"))
 (def- anthropic-redirect-uri "https://console.anthropic.com/oauth/code/callback")
 (def- anthropic-scopes "org:create_api_key user:profile user:inference")
 
@@ -507,10 +518,11 @@
 (defn openai-generate-state
   "Generate a random 16-byte hex string for CSRF protection."
   []
-  (def result (process/exec "sh" ["-c" "openssl rand -hex 16"]))
-  (when (not= 0 (result :status))
-    (error "Failed to generate OAuth state"))
-  (string/trim (result :stdout)))
+  (def bytes (crypto/random-bytes 16))
+  (def buf @"")
+  (each b bytes
+    (buffer/push buf (string/format "%02x" b)))
+  (string buf))
 
 (defn openai-auth-url
   "Build the OpenAI OAuth authorization URL from a PKCE pair and state."

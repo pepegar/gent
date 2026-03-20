@@ -1,4 +1,5 @@
 mod buffer;
+mod crypto;
 mod http;
 mod json;
 mod net;
@@ -18,4 +19,5 @@ pub fn register(client: &mut JanetClient) {
     json::register(client);
     task::register(client);
     buffer::register(client);
+    crypto::register(client);
 }
