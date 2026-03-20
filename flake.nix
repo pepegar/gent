@@ -1,4 +1,15 @@
 {
+  nixConfig = {
+    extra-substituters = [
+      "https://nix-community.cachix.org"
+      "https://gent.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "gent.cachix.org-1:V2dfRGc+kcxpr+0WXZXe5fOTrfW+ZnAOI7FR1aLV0e8="
+    ];
+  };
+
   description = "gent - An extensible coding agent";
 
   inputs = {
