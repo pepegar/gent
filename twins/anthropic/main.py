@@ -284,6 +284,7 @@ async def list_models(
 @app.post("/v1/oauth/token")
 async def oauth_token(request: Request):
     body = await request.json()
+    control.record_request({"endpoint": "oauth_token", "headers": dict(request.headers), "body": body})
     grant_type = body.get("grant_type")
 
     if grant_type == "authorization_code":

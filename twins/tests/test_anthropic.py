@@ -345,3 +345,82 @@ def test_control_reset(client):
     assert resp.status_code == 200
     body = resp.json()
     assert "[echo]" in body["content"][0]["text"]
+
+
+def test_oauth_token_exchange(client):
+    resp = client.post(
+        "/v1/oauth/token",
+        json={
+            "grant_type": "authorization_code",
+            "client_id": "test-client",
+            "code": "test-code",
+            "redirect_uri": "https://example.com/callback",
+            "code_verifier": "test-verifier",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_token"].startswith("twin-access-")
+    assert body["refresh_token"].startswith("twin-refresh-")
+    assert body["expires_in"] == 3600
+    assert body["token_type"] == "bearer"
+
+
+def test_oauth_token_exchange_records_request(client):
+    """Verify the token exchange request is captured in the control plane."""
+    client.post(
+        "/v1/oauth/token",
+        json={
+            "grant_type": "authorization_code",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+            "code": "auth-code-xyz",
+            "redirect_uri": "https://console.anthropic.com/oauth/code/callback",
+            "code_verifier": "pkce-verifier-abc",
+        },
+    )
+    requests_resp = client.get("/__control/requests")
+    requests_list = requests_resp.json()
+    oauth_reqs = [r for r in requests_list if r.get("endpoint") == "oauth_token"]
+    assert len(oauth_reqs) == 1
+    assert oauth_reqs[0]["body"]["grant_type"] == "authorization_code"
+    assert oauth_reqs[0]["body"]["code"] == "auth-code-xyz"
+    assert oauth_reqs[0]["body"]["code_verifier"] == "pkce-verifier-abc"
+
+
+def test_oauth_token_refresh(client):
+    resp = client.post(
+        "/v1/oauth/token",
+        json={
+            "grant_type": "refresh_token",
+            "client_id": "test-client",
+            "refresh_token": "some-refresh-token",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_token"].startswith("twin-access-")
+    assert body["refresh_token"].startswith("twin-refresh-")
+    assert body["expires_in"] == 3600
+
+
+def test_oauth_invalid_grant_type(client):
+    resp = client.post(
+        "/v1/oauth/token",
+        json={"grant_type": "client_credentials"},
+    )
+    assert resp.status_code == 400
+
+
+def test_oauth_token_accepted_for_api_calls(client):
+    """Verify that twin-access-* tokens are accepted for API calls (Bearer auth)."""
+    headers = {
+        "authorization": "Bearer twin-access-test-uuid-12345",
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    resp = client.post(
+        "/v1/messages",
+        headers=headers,
+        json={**MINIMAL_BODY, "stream": False},
+    )
+    assert resp.status_code == 200

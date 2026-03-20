@@ -142,6 +142,7 @@ jobs:
           bash test/twin-provider-switch.sh
           bash test/twin-error-handling.sh
           bash test/twin-error-scenarios.sh
+          bash test/twin-oauth.sh
 
       - name: Stop twin containers
         if: always()

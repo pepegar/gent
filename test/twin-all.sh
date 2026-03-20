@@ -64,6 +64,7 @@ run_section "E2E: auth verification"      bash "$SCRIPT_DIR/twin-auth.sh"
 run_section "E2E: provider switching"     bash "$SCRIPT_DIR/twin-provider-switch.sh"
 run_section "E2E: error handling"         bash "$SCRIPT_DIR/twin-error-handling.sh"
 run_section "E2E: error scenarios"        bash "$SCRIPT_DIR/twin-error-scenarios.sh"
+run_section "E2E: OAuth PKCE login"       bash "$SCRIPT_DIR/twin-oauth.sh"
 
 # ── Results ─────────────────────────────────────────────────────
 
