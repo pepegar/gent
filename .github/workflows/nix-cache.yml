@@ -5,14 +5,13 @@ on:
     branches:
       - main
 
-concurrency:
-  group: nix-cache-${{ github.ref }}-${{ matrix.os }}
-  cancel-in-progress: true
-
 jobs:
   populate:
     name: Populate ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    concurrency:
+      group: nix-cache-${{ github.ref }}-${{ matrix.os }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
