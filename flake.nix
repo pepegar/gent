@@ -45,6 +45,10 @@
       nativeBuildInputs = with pkgs; [
         rustToolchain
         pkg-config
+      ] ++ lib.optionals stdenv.isLinux [
+        # Linux build dependencies for bindgen
+        libclang
+        llvmPackages.clang
       ];
 
       # Runtime dependencies
@@ -53,6 +57,10 @@
           # Modern Darwin framework paths
           apple-sdk
           libiconv
+        ]
+        ++ lib.optionals stdenv.isLinux [
+          # Linux dependencies for bindgen/libclang
+          libclang.lib
         ];
 
       # Common package attributes
@@ -66,6 +74,10 @@
         inherit nativeBuildInputs buildInputs;
         # Pass git revision to build.rs
         GIT_HASH = self.shortRev or "dirty";
+        # Set up environment for bindgen on Linux
+        LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+        BINDGEN_EXTRA_CLANG_ARGS = pkgs.lib.optionalString pkgs.stdenv.isLinux
+          "-I${pkgs.glibc.dev}/include";
         meta = with pkgs.lib; {
           description = "An extensible coding agent built as a lisp machine";
           homepage = "https://github.com/pepegar/gent";
