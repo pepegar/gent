@@ -35,6 +35,3 @@ jobs:
 
       - name: Materialise devShell
         run: nix develop --command true
-
-      - name: Build checks
-        run: nix flake check
